@@ -1,5 +1,26 @@
 # Community Outreach Technology Loan API
 
+## Sign in and administrator account setup
+
+The repository contains both the API backend and a frontend folder. The API accepts sign-in requests at `POST /v1/auth/login`; it does not provide a built-in username or password. Create an administrator account for your own database, then use that email and password to sign in. Never put real credentials in this README or commit them to Git.
+
+1. Install the dependencies and copy `.env.example` to `.env`. Add your database connection values and a private `JWT_SECRET` of at least 32 characters to `.env`.
+2. Set up the database tables using the project schema and migration instructions.
+3. Run `npx tsx src/create-admin.ts`. Enter the administrator email and choose a password when prompted. The password is hidden while typing and must be 12–256 characters. The account is assigned to the `city-of-orlando` tenant.
+4. Start the API with `npm run dev`.
+
+For API clients, send the login email and password as JSON:
+
+```sh
+curl -X POST http://127.0.0.1:3020/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"YOUR_ADMIN_EMAIL","password":"YOUR_PASSWORD"}'
+```
+
+A successful sign-in returns a bearer token valid for 15 minutes. Use it in `Authorization: Bearer <token>` for protected API requests. Invalid credentials return `401`, and login attempts are rate limited. The password and token are private; do not paste real values into GitHub.
+
+
+
 Fastify/TypeScript API for tenant-scoped outreach centers, devices, loans, loan reasons, and maintenance. JSON fields use camelCase; a MySQL repository maps them to snake_case columns.
 
 ## Run
