@@ -9,8 +9,8 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 
-import { InMemoryInventoryRepository } from "./repository.js";
-
+import { MySqlInventoryRepository } from "./mysql-inventory-repository.js";
+import { authenticateUser } from "./auth-service.js";
 import {
   DEVICE_STATUSES,
   DEVICE_TYPES,
@@ -25,11 +25,12 @@ import {
 declare module "@fastify/jwt" {
   interface FastifyJWT {
     payload: {
+      sub?: string;
       tenantId: string;
       roles: string[];
     };
-
     user: {
+      sub?: string;
       tenantId: string;
       roles: string[];
     };
@@ -74,6 +75,10 @@ const pagination = {
 
 const nonempty = (max: number) =>
   z.string().trim().min(1).max(max);
+const loginBodySchema = z.object({
+  email: z.string().trim().email().max(255),
+  password: z.string().min(1).max(256),
+}).strict();
 
 const idParams = (name: string) =>
   z.object({
@@ -145,7 +150,13 @@ const developmentRoles = [
   "loan-reasons:read",
   "loan-reasons:write"
 ];
-
+const staffRoles = [
+  "inventory:read",
+  "loans:read",
+  "centers:read",
+  "maintenance:read",
+  "loan-reasons:read",
+];
 /**
  * Validation function
  */
@@ -213,9 +224,8 @@ const pageResponse = <T>(
  */
 export async function buildApp(
   repository: InventoryRepository =
-    new InMemoryInventoryRepository()
+    new MySqlInventoryRepository()
 ): Promise<FastifyInstance> {
-
   const app = Fastify({
     logger: {
       redact: [
@@ -334,17 +344,72 @@ export async function buildApp(
     })
   );
 
+app.post(
+  "/v1/auth/login",
+  {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: "1 minute",
+      },
+    },
+  },
+  async (request, reply) => {
+    const body = parse(loginBodySchema, request.body);
+
+    const result = await authenticateUser(
+      body.email,
+      body.password,
+      request.id,
+    );
+
+    if (!result.success) {
+      return reply.code(401).send({
+        error: "Invalid email or password",
+        requestId: request.id,
+      });
+    }
+
+    const roles =
+      result.user.role === "ADMIN" ? developmentRoles : staffRoles;
+
+    const token = await reply.jwtSign(
+      {
+        sub: result.user.id,
+        tenantId: result.user.tenantId,
+        roles,
+      },
+      { expiresIn: "15m" },
+    );
+
+    return {
+      token,
+      tokenType: "Bearer",
+      expiresIn: "15m",
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        role: result.user.role,
+      },
+    };
+  },
+);
+
+
   /**
    * JWT authentication hook
    *
    * Development token endpoint remains public.
    */
-  app.addHook(
+ app.addHook(
     "onRequest",
     async (request) => {
+      const pathname = request.url.split("?")[0] ?? request.url;
+
       if (
-        !request.url.startsWith("/v1/") ||
-        request.url === "/v1/dev/token"
+        !pathname.startsWith("/v1/") ||
+        pathname === "/v1/dev/token" ||
+        pathname === "/v1/auth/login"
       ) {
         return;
       }

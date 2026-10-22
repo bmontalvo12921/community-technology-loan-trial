@@ -1,5 +1,19 @@
 node_modules/
 dist/
-.env
 coverage/
 postman/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.local
+*.token
+*.pem
+*.key
+*credentials*.json
+*credential*.json
+
+# Temporary local credential/token artifacts
+*token*.txt
+*secret*.txt

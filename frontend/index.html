@@ -1,0 +1,110 @@
+﻿
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Community Technology Loan</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px Arial,sans-serif;background:#f2f5f9;color:#1d2939}
+header{background:#142b4a;color:white;padding:22px 28px}header h1{margin:0 0 6px;font-size:23px}
+main{max-width:1200px;margin:auto;padding:24px}.panel,.card{background:white;border:1px solid #dce4ee;border-radius:10px;padding:20px;margin-bottom:18px}
+.login{max-width:430px;margin:55px auto}.field{margin:14px 0}label{display:block;margin-bottom:6px;font-weight:bold}
+input{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
+button{padding:10px 15px;border:0;border-radius:6px;background:#2463a6;color:white;cursor:pointer;margin:3px}
+button:hover{background:#184b80}.secondary{background:#e8eef6;color:#142b4a}
+nav{margin:16px 0}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+.metric{font-size:30px;font-weight:bold;margin-top:10px}.muted{color:#667085;font-size:13px}
+table{border-collapse:collapse;width:100%;background:white}th,td{text-align:left;padding:12px;border-bottom:1px solid #e5e7eb}
+th{background:#f8fafc} .table-wrap{overflow:auto}.hidden{display:none!important}
+#message{padding:12px;border-radius:7px;margin:12px 0;background:#e8f4ff;white-space:pre-wrap}
+.error{background:#fff0ef!important;color:#a32018}.success{background:#e7f7ed!important;color:#17663a}
+</style>
+</head>
+<body>
+<header><h1>Community Technology Loan</h1><div>City of Orlando · Inventory Management</div></header>
+<main>
+<div id="message" class="hidden"></div>
+<section id="loginPanel" class="panel login">
+<h2>Sign in</h2><p class="muted">Sign in with your existing API account.</p>
+<form id="loginForm">
+<div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="username" required value="admin@orlando.gov"></div>
+<div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div>
+<button type="submit" id="loginButton">Sign in</button>
+</form>
+</section>
+<section id="appPanel" class="hidden">
+<div class="panel"><strong id="userInfo"></strong><button class="secondary" id="logoutButton">Log out</button><button id="refreshButton">Refresh data</button></div>
+<h2>Overview</h2>
+<div class="cards">
+<div class="card"><div class="muted">Devices</div><div class="metric" id="deviceCount">—</div></div>
+<div class="card"><div class="muted">Available devices</div><div class="metric" id="availableCount">—</div></div>
+<div class="card"><div class="muted">Outreach centers</div><div class="metric" id="centerCount">—</div></div>
+<div class="card"><div class="muted">Loan reasons</div><div class="metric" id="reasonCount">—</div></div>
+</div>
+<nav>
+<button data-tab="inventory">Inventory</button>
+<button data-tab="centers">Outreach Centers</button>
+<button data-tab="reasons">Loan Reasons</button>
+<button data-tab="loans">Loans</button>
+<button data-tab="maintenance">Maintenance</button>
+</nav>
+<div class="panel"><h2 id="tableTitle">Inventory</h2><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
+<p class="muted">Loan creation is disabled here while its API error is investigated.</p>
+</section>
+</main>
+<script>
+const API="http://localhost:3020";
+let token="",user=null,activeTab="inventory";
+const data={inventory:[],centers:[],reasons:[],loans:[],maintenance:[]};
+const $=id=>document.getElementById(id);
+function message(text,type=""){const el=$("message");el.textContent=text;el.className=type;el.classList.remove("hidden")}
+function clearMessage(){$("message").classList.add("hidden")}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function api(path,options={}){
+ const headers={Accept:"application/json",...(options.body?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})};
+ const response=await fetch(API+path,{...options,headers});
+ let body;try{body=await response.json()}catch{body={}}
+ if(!response.ok)throw Error(body.error||body.message||("HTTP "+response.status+" from "+path));
+ return body;
+}
+function listFrom(body){const d=body.data??body;return Array.isArray(d)?d:(Array.isArray(d.items)?d.items:[])}
+async function load(path){return listFrom(await api(path))}
+$("loginForm").addEventListener("submit",async e=>{
+ e.preventDefault();clearMessage();$("loginButton").disabled=true;$("loginButton").textContent="Signing in…";
+ try{
+  const result=await api("/v1/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});
+  token=result.token;user=result.user;$("password").value="";
+  $("loginPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");
+  $("userInfo").textContent=user.email+" · "+user.role;
+  message("Signed in successfully.","success");await refreshData();
+ }catch(err){message("Login failed: "+err.message,"error")}
+ finally{$("loginButton").disabled=false;$("loginButton").textContent="Sign in"}
+});
+$("logoutButton").addEventListener("click",()=>{token="";user=null;Object.keys(data).forEach(k=>data[k]=[]);$("appPanel").classList.add("hidden");$("loginPanel").classList.remove("hidden");$("password").value="";clearMessage()});
+$("refreshButton").addEventListener("click",refreshData);
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>render(b.dataset.tab)));
+async function refreshData(){
+ clearMessage();$("tableContent").textContent="Loading data…";
+ const paths={inventory:"/v1/inventory",centers:"/v1/centers",reasons:"/v1/loan-reasons",loans:"/v1/loans",maintenance:"/v1/maintenance"};
+ const results=await Promise.allSettled(Object.entries(paths).map(async([k,p])=>{data[k]=await load(p);return k}));
+ const failures=results.map((r,i)=>r.status==="rejected"?Object.keys(paths)[i]+": "+r.reason.message:null).filter(Boolean);
+ $("deviceCount").textContent=data.inventory.length;
+ $("availableCount").textContent=data.inventory.filter(x=>x.status==="AVAILABLE").length;
+ $("centerCount").textContent=data.centers.length;$("reasonCount").textContent=data.reasons.length;
+ render(activeTab);
+ if(failures.length)message("Some sections could not load:\n"+failures.join("\n"),"error");
+}
+function table(headers,rows){if(!rows.length)return "<p>No records found.</p>";return "<table><thead><tr>"+headers.map(x=>"<th>"+esc(x)+"</th>").join("")+"</tr></thead><tbody>"+rows.map(row=>"<tr>"+row.map(x=>"<td>"+esc(x??"")+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
+function render(tab){
+ activeTab=tab;let title,headers,rows;
+ if(tab==="inventory"){title="Inventory";headers=["ID","Asset Tag","Serial Number","Type","Manufacturer","Model","Status","Center"];rows=data.inventory.map(x=>[x.deviceId,x.assetTag,x.serialNumber,x.deviceType,x.manufacturer,x.model,x.status,x.centerId])}
+ else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"];rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"])}
+ else if(tab==="reasons"){title="Loan Reasons";headers=["ID","Reason"];rows=data.reasons.map(x=>[x.reasonId,x.reasonName])}
+ else if(tab==="loans"){title="Loans";headers=["ID","Device","Center","Reason","Participant Code","Checkout","Due","Status"];rows=data.loans.map(x=>[x.loanId,x.deviceId,x.centerId,x.reasonId,x.participantCode,x.checkoutDate,x.dueDate,x.loanStatus])}
+ else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"];rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus])}
+ $("tableTitle").textContent=title;$("tableContent").innerHTML=table(headers,rows);
+}
+</script>
+</body>
+</html>
