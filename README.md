@@ -309,3 +309,5 @@ curl -X POST http://127.0.0.1:3020/v1/dev/token -H "content-type: application/js
 - A dedicated device-event table is required to record transfers, manual status changes, and edits independently of loans and maintenance.
 - Consider adding `is_active` to `loan_reasons` if reasons need to be retired without deletion.
 - Add a separate readiness endpoint or check for MySQL connectivity.
+## Credits
+- [@luismonserratt](https://github.com/luismonserratt) — Added CORS support for frontend integration.
