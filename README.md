@@ -311,3 +311,4 @@ curl -X POST http://127.0.0.1:3020/v1/dev/token -H "content-type: application/js
 - Add a separate readiness endpoint or check for MySQL connectivity.
 ## Credits
 - [@luismonserratt](https://github.com/luismonserratt) — Added CORS support for frontend integration.
+- [@johnathan-mcallister](https://github.com/johnathan-mcallister) — Original inventory API implementation.
