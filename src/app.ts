@@ -9,6 +9,8 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
+import { db } from "./db.js";
+import { hashPassword } from "./password.js";
 
 import { MySqlInventoryRepository } from "./mysql-inventory-repository.js";
 import { authenticateUser } from "./auth-service.js";
@@ -149,7 +151,9 @@ const developmentRoles = [
   "maintenance:read",
   "maintenance:write",
   "loan-reasons:read",
-  "loan-reasons:write"
+  "loan-reasons:write",
+  "users:read",
+  "users:write"
 ];
 const staffRoles = [
   "inventory:read",
@@ -425,6 +429,115 @@ app.post(
       }
 
       await request.jwtVerify();
+    }
+  );
+
+  /**
+   * ============================
+   * USERS (admin only)
+   * ============================
+   */
+
+  const userBody = z
+    .object({
+      email: z.string().trim().toLowerCase().email().max(255),
+      password: z.string().min(12).max(256),
+      role: z.enum(["ADMIN", "STAFF"])
+    })
+    .strict();
+
+  app.get(
+    "/v1/users",
+    { preHandler: authorize("users:read") },
+    async (request) => {
+      const [rows] = await db.execute(
+        `SELECT id, email, role, is_active
+           FROM users
+          WHERE tenant_id = ?
+          ORDER BY id`,
+        [request.user.tenantId]
+      );
+
+      return {
+        data: (rows as any[]).map((row) => ({
+          userId: Number(row.id),
+          email: row.email,
+          role: row.role,
+          isActive: Boolean(row.is_active)
+        }))
+      };
+    }
+  );
+
+  app.post(
+    "/v1/users",
+    { preHandler: authorize("users:write") },
+    async (request, reply) => {
+      const body = parse(userBody, request.body);
+      const passwordHash = await hashPassword(body.password);
+
+      try {
+        const [result] = await db.execute(
+          `INSERT INTO users
+             (tenant_id, email, password_hash, role, is_active)
+           VALUES (?, ?, ?, ?, 1)`,
+          [request.user.tenantId, body.email, passwordHash, body.role]
+        );
+
+        return reply.code(201).send({
+          data: {
+            userId: Number((result as { insertId: number }).insertId),
+            email: body.email,
+            role: body.role,
+            isActive: true
+          }
+        });
+      } catch (error) {
+        if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
+          throw Object.assign(
+            new Error("A user with that email already exists"),
+            { statusCode: 409 }
+          );
+        }
+        throw error;
+      }
+    }
+  );
+
+  app.patch(
+    "/v1/users/:userId",
+    { preHandler: authorize("users:write") },
+    async (request) => {
+      const { userId } = parse(
+        idParams("userId"),
+        request.params
+      ) as { userId: number };
+
+      const body = parse(
+        z.object({ isActive: z.boolean() }).strict(),
+        request.body
+      );
+
+      if (String(userId) === String(request.user.sub) && !body.isActive) {
+        throw Object.assign(
+          new Error("You cannot deactivate your own account"),
+          { statusCode: 400 }
+        );
+      }
+
+      const [result] = await db.execute(
+        `UPDATE users SET is_active = ?
+          WHERE id = ? AND tenant_id = ?`,
+        [body.isActive ? 1 : 0, userId, request.user.tenantId]
+      );
+
+      if ((result as { affectedRows: number }).affectedRows === 0) {
+        throw Object.assign(new Error("User not found"), {
+          statusCode: 404
+        });
+      }
+
+      return { data: { userId, isActive: body.isActive } };
     }
   );
 

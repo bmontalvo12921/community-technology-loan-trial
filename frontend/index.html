@@ -32,6 +32,11 @@ body.signed-out main{max-width:none;padding:0}
 .signin-card input{padding:9px;font-size:12px;border-radius:4px}
 .signin-card button{width:100%;margin:6px 0 0;padding:10px;background:#1d4f8a;font-weight:bold;font-size:12px;border-radius:4px}
 #signinError{margin:0 0 10px;padding:9px;border-radius:4px;font-size:12px;background:#fff0ef;color:#a32018}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+.formgrid label{font-size:12px}select{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;background:#fff}
+.danger{background:#b42318}.danger:hover{background:#912018}.small{padding:6px 10px;font-size:13px}
+#formArea form{margin-bottom:20px}
 </style>
 </head>
 <body class="signed-out">
@@ -66,15 +71,17 @@ body.signed-out main{max-width:none;padding:0}
 <button data-tab="reasons">Loan Reasons</button>
 <button data-tab="loans">Loans</button>
 <button data-tab="maintenance">Maintenance</button>
+<button data-tab="users" id="usersTab" class="hidden">Users</button>
 </nav>
-<div class="panel"><h2 id="tableTitle">Inventory</h2><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
-<p class="muted">Loan creation is disabled here while its API error is investigated.</p>
+<div class="panel"><div class="toolbar"><h2 id="tableTitle">Inventory</h2><button id="addButton" class="hidden"></button></div><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
+<p class="muted">Admins can add equipment, centers and users, and deactivate centers and users. Records are deactivated rather than deleted so loan history stays intact. Loan creation is disabled here while its API error is investigated.</p>
 </section>
 </main>
 <script>
 const API="";
 let token="",user=null,activeTab="inventory";
-const data={inventory:[],centers:[],reasons:[],loans:[],maintenance:[]};
+const data={inventory:[],centers:[],reasons:[],loans:[],maintenance:[],users:[]};
+const isAdmin=()=>user&&user.role==="ADMIN";
 const $=id=>document.getElementById(id);
 function message(text,type=""){const el=$("message");el.textContent=text;el.className=type;el.classList.remove("hidden")}
 function clearMessage(){$("message").classList.add("hidden")}
@@ -83,7 +90,7 @@ async function api(path,options={}){
  const headers={Accept:"application/json",...(options.body?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})};
  const response=await fetch(API+path,{...options,headers});
  let body;try{body=await response.json()}catch{body={}}
- if(!response.ok)throw Error(body.error||body.message||("HTTP "+response.status+" from "+path));
+ if(!response.ok){const e=Error(body.error||body.message||("HTTP "+response.status+" from "+path));if(body.details){const f=body.details.fieldErrors||{};e.details=Object.entries(f).map(([k,v])=>k+": "+v.join(", ")).join("\n")}throw e}
  return body;
 }
 function listFrom(body){const d=body.data??body;return Array.isArray(d)?d:(Array.isArray(d.items)?d.items:[])}
@@ -94,7 +101,7 @@ $("loginForm").addEventListener("submit",async e=>{
   const result=await api("/v1/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});
   token=result.token;user=result.user;$("password").value="";
   $("loginPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");document.body.classList.remove("signed-out");$("signinError").classList.add("hidden");
-  $("userInfo").textContent=user.email+" · "+user.role;
+  $("userInfo").textContent=user.email+" · "+user.role;$("usersTab").classList.toggle("hidden",!isAdmin());
   message("Signed in successfully.","success");await refreshData();
  }catch(err){$("signinError").textContent="Login failed: "+err.message;$("signinError").classList.remove("hidden")}
  finally{$("loginButton").disabled=false;$("loginButton").textContent="Sign In"}
@@ -104,7 +111,8 @@ $("refreshButton").addEventListener("click",refreshData);
 document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>render(b.dataset.tab)));
 async function refreshData(){
  clearMessage();$("tableContent").textContent="Loading data…";
- const paths={inventory:"/v1/inventory",centers:"/v1/centers",reasons:"/v1/loan-reasons",loans:"/v1/loans",maintenance:"/v1/maintenance"};
+ const paths={inventory:"/v1/inventory?limit=100",centers:"/v1/centers?limit=100",reasons:"/v1/loan-reasons?limit=100",loans:"/v1/loans?limit=100",maintenance:"/v1/maintenance?limit=100"};
+ if(isAdmin())paths.users="/v1/users";
  const results=await Promise.allSettled(Object.entries(paths).map(async([k,p])=>{data[k]=await load(p);return k}));
  const failures=results.map((r,i)=>r.status==="rejected"?Object.keys(paths)[i]+": "+r.reason.message:null).filter(Boolean);
  $("deviceCount").textContent=data.inventory.length;
@@ -113,16 +121,53 @@ async function refreshData(){
  render(activeTab);
  if(failures.length)message("Some sections could not load:\n"+failures.join("\n"),"error");
 }
-function table(headers,rows){if(!rows.length)return "<p>No records found.</p>";return "<table><thead><tr>"+headers.map(x=>"<th>"+esc(x)+"</th>").join("")+"</tr></thead><tbody>"+rows.map(row=>"<tr>"+row.map(x=>"<td>"+esc(x??"")+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
+function table(headers,rows){if(!rows.length)return "<p>No records found.</p>";return "<table><thead><tr>"+headers.map(x=>"<th>"+esc(x)+"</th>").join("")+"</tr></thead><tbody>"+rows.map(row=>"<tr>"+row.map(x=>"<td>"+(x&&x.html?x.html:esc(x??""))+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
+const ADDABLE={inventory:"Add equipment",centers:"Add center",users:"Add user"};
+function actionBtn(label,fn,cls=""){return '<button class="small '+cls+'" onclick="'+fn+'">'+label+'</button>'}
 function render(tab){
  activeTab=tab;let title,headers,rows;
+ $("formArea").innerHTML="";
  if(tab==="inventory"){title="Inventory";headers=["ID","Asset Tag","Serial Number","Type","Manufacturer","Model","Status","Center"];rows=data.inventory.map(x=>[x.deviceId,x.assetTag,x.serialNumber,x.deviceType,x.manufacturer,x.model,x.status,x.centerId])}
- else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"];rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"])}
+ else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"].concat(isAdmin()?["Action"]:[]);rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"].concat(isAdmin()?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleCenter("+x.centerId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
  else if(tab==="reasons"){title="Loan Reasons";headers=["ID","Reason"];rows=data.reasons.map(x=>[x.reasonId,x.reasonName])}
  else if(tab==="loans"){title="Loans";headers=["ID","Device","Center","Reason","Participant Code","Checkout","Due","Status"];rows=data.loans.map(x=>[x.loanId,x.deviceId,x.centerId,x.reasonId,x.participantCode,x.checkoutDate,x.dueDate,x.loanStatus])}
+ else if(tab==="users"){title="Users";headers=["ID","Email","Role","Active","Action"];rows=data.users.map(x=>[x.userId,x.email,x.role,x.isActive?"Yes":"No",{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleUser("+x.userId+","+!x.isActive+")",x.isActive?"danger":"")}])}
  else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"];rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus])}
  $("tableTitle").textContent=title;$("tableContent").innerHTML=table(headers,rows);
+ const add=$("addButton");const canAdd=isAdmin()&&ADDABLE[tab];
+ add.classList.toggle("hidden",!canAdd);if(canAdd)add.textContent="+ "+ADDABLE[tab];
 }
+$("addButton").addEventListener("click",()=>showForm(activeTab));
+const val=id=>$(id).value.trim();
+function field(id,label,type="text",extra=""){return '<div><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" '+extra+' required></div>'}
+function select(id,label,opts){return '<div><label for="'+id+'">'+label+'</label><select id="'+id+'">'+opts.map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+'</option>').join("")+'</select></div>'}
+function showForm(tab){
+ let body,submit;
+ if(tab==="inventory"){
+  const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName]);
+  if(!centers.length){message("Add an outreach center first. Equipment must belong to a center.","error");return}
+  body=field("f_asset","Asset tag","text",'maxlength="50"')+field("f_serial","Serial number","text",'maxlength="100"')+
+   select("f_type","Type",[["LAPTOP","Laptop"],["TABLET","Tablet"],["HOTSPOT","Hotspot"]])+field("f_make","Manufacturer","text",'maxlength="100"')+field("f_model","Model","text",'maxlength="100"')+
+   select("f_status","Status",[["AVAILABLE","Available"],["MAINTENANCE","Maintenance"]])+select("f_center","Outreach center",centers);
+  submit=()=>["/v1/inventory",{assetTag:val("f_asset"),serialNumber:val("f_serial"),deviceType:$("f_type").value,manufacturer:val("f_make"),model:val("f_model"),status:$("f_status").value,centerId:Number($("f_center").value)}];
+ }else if(tab==="centers"){
+  body=field("f_name","Center name","text",'maxlength="100"')+field("f_addr","Address","text",'maxlength="255"')+field("f_phone","Phone","tel",'maxlength="20"');
+  submit=()=>["/v1/centers",{centerName:val("f_name"),address:val("f_addr"),phone:val("f_phone"),isActive:true}];
+ }else{
+  body=field("f_email","Email","email",'maxlength="255" placeholder="name@orlando.gov"')+field("f_pass","Password (12+ characters)","password",'minlength="12" maxlength="256" autocomplete="new-password"')+
+   select("f_role","Role",[["STAFF","Staff (view only)"],["ADMIN","Admin (add and edit)"]]);
+  submit=()=>["/v1/users",{email:val("f_email"),password:$("f_pass").value,role:$("f_role").value}];
+ }
+ $("formArea").innerHTML='<form id="addForm"><div class="formgrid">'+body+'</div><button type="submit">Save</button><button type="button" class="secondary" id="cancelForm">Cancel</button></form>';
+ $("cancelForm").onclick=()=>{$("formArea").innerHTML=""};
+ $("addForm").addEventListener("submit",async e=>{
+  e.preventDefault();clearMessage();const [path,payload]=submit();
+  try{await api(path,{method:"POST",body:JSON.stringify(payload)});message("Saved.","success");await refreshData()}
+  catch(err){message("Could not save: "+err.message+(err.details?"\n"+err.details:""),"error")}
+ });
+}
+async function toggleCenter(id,active){try{await api("/v1/centers/"+id,{method:"PATCH",body:JSON.stringify({isActive:active})});await refreshData()}catch(err){message("Could not update: "+err.message,"error")}}
+async function toggleUser(id,active){try{await api("/v1/users/"+id,{method:"PATCH",body:JSON.stringify({isActive:active})});await refreshData()}catch(err){message("Could not update: "+err.message,"error")}}
 </script>
 </body>
 </html>
