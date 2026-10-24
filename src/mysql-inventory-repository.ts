@@ -39,6 +39,12 @@ function dateValue(value: unknown): string {
   return stringValue(value);
 }
 
+// MySQL DATETIME columns reject ISO strings with a "Z"/offset suffix.
+// The pool runs in UTC (see db.ts), so write UTC "YYYY-MM-DD HH:MM:SS".
+function toSqlDateTime(iso: string): string {
+  return new Date(iso).toISOString().slice(0, 19).replace("T", " ");
+}
+
 function dateOnlyValue(value: unknown): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return stringValue(value).slice(0, 10);
@@ -540,8 +546,8 @@ export class MySqlInventoryRepository implements InventoryRepository {
           input.centerId,
           input.reasonId,
           input.participantCode,
-          input.checkoutDate,
-          input.dueDate,
+          toSqlDateTime(input.checkoutDate),
+          toSqlDateTime(input.dueDate),
         ],
       );
 
@@ -599,7 +605,7 @@ export class MySqlInventoryRepository implements InventoryRepository {
 
     if (patch.dueDate !== undefined) {
       assignments.push("due_date = ?");
-      values.push(patch.dueDate);
+      values.push(toSqlDateTime(patch.dueDate));
     }
 
     if (patch.reasonId !== undefined) {
@@ -670,7 +676,7 @@ export class MySqlInventoryRepository implements InventoryRepository {
         `UPDATE loans
          SET return_date = ?, loan_status = 'RETURNED'
          WHERE tenant_id = ? AND loan_id = ?`,
-        [returnDate, t, id],
+        [toSqlDateTime(returnDate), t, id],
       );
 
       await connection.execute(
