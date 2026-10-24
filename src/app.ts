@@ -7,6 +7,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
+import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
 import { MySqlInventoryRepository } from "./mysql-inventory-repository.js";
@@ -333,6 +334,15 @@ export async function buildApp(
         });
     }
   );
+
+  /**
+   * Staff portal (single-page frontend)
+   */
+  const portalUrl = new URL("../frontend/index.html", import.meta.url);
+  app.get("/", async (_request, reply) => {
+    const html = await readFile(portalUrl, "utf8");
+    return reply.type("text/html; charset=utf-8").send(html);
+  });
 
   /**
    * Health check
