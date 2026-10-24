@@ -158,6 +158,7 @@ const developmentRoles = [
 const staffRoles = [
   "inventory:read",
   "loans:read",
+  "loans:write",
   "centers:read",
   "maintenance:read",
   "loan-reasons:read",
