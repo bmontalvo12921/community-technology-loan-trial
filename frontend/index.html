@@ -165,8 +165,8 @@ function showForm(tab){
   const devices=data.inventory.filter(d=>d.status==="AVAILABLE").map(d=>[d.deviceId,d.assetTag+" · "+d.manufacturer+" "+d.model]);
   const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName]);
   const reasons=data.reasons.map(r=>[r.reasonId,r.reasonName]);
-  if(!devices.length){message("No equipment is available to loan. Add equipment or mark a loan returned first.","error");return}
-  if(!centers.length||!reasons.length){message("Add at least one outreach center and one loan reason first.","error");return}
+  if(!devices.length){$("formArea").innerHTML='<div class="error" style="padding:12px;border-radius:7px;margin:12px 0">No equipment is available to loan. Add equipment, or mark an active loan returned or a maintenance record resolved first.</div>';return}
+  if(!centers.length||!reasons.length){const need=[!centers.length?"an outreach center":"",!reasons.length?"a loan reason":""].filter(Boolean).join(" and ");$("formArea").innerHTML='<div id="message" class="error" style="display:block">To assign equipment you first need '+need+'. '+(isAdmin()?"Add it from the "+(!centers.length?"Outreach Centers":"Loan Reasons")+" tab.":"Ask an admin to add it.")+'</div>';return}
   const now=new Date(),due=new Date(now.getTime()+14*864e5),loc=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
   body=select("f_device","Equipment",devices)+select("f_lcenter","Outreach center",centers)+select("f_lreason","Reason",reasons)+
    field("f_code","Borrower","text",'maxlength="50" placeholder="Name or participant ID"')+

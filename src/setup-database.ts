@@ -109,6 +109,33 @@ const TABLES: string[] = [
   ) ENGINE=InnoDB`,
 ];
 
+const DEFAULT_REASONS = [
+  "Job search",
+  "School or education",
+  "Telehealth or medical appointment",
+  "Government services",
+  "Other",
+];
+
+// Loans need a reason, so start new databases with a few. Only runs when
+// the tenant has none, so reasons that were renamed are never re-added.
+async function ensureLoanReasons(): Promise<void> {
+  const [rows] = await db.execute(
+    "SELECT COUNT(*) AS n FROM loan_reasons WHERE tenant_id = ?",
+    [TENANT_ID],
+  );
+
+  if (Number((rows as { n: number }[])[0]?.n ?? 0) > 0) return;
+
+  for (const name of DEFAULT_REASONS) {
+    await db.execute(
+      "INSERT IGNORE INTO loan_reasons (tenant_id, reason_name) VALUES (?, ?)",
+      [TENANT_ID, name],
+    );
+  }
+  console.log("Added default loan reasons.");
+}
+
 async function ensureAccount(
   role: "ADMIN" | "STAFF",
   email: string | undefined,
@@ -137,6 +164,7 @@ try {
     await db.query(statement);
   }
   console.log("Database tables are in place.");
+  await ensureLoanReasons();
 
   await ensureAccount(
     "ADMIN",
