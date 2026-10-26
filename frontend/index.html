@@ -68,13 +68,12 @@ body.signed-out main{max-width:none;padding:0}
 <nav>
 <button data-tab="inventory">Inventory</button>
 <button data-tab="centers">Outreach Centers</button>
-<button data-tab="reasons">Loan Reasons</button>
 <button data-tab="loans">Loans</button>
 <button data-tab="maintenance">Maintenance</button>
 <button data-tab="users" id="usersTab" class="hidden">Users</button>
 </nav>
-<div class="panel"><div class="toolbar"><h2 id="tableTitle">Inventory</h2><button id="addButton" class="hidden"></button></div><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
-<p class="muted">Staff and admins can assign equipment, edit a loan's reason or due date, and mark loans returned. Admins can also add equipment, centers, loan reasons, maintenance records and users, and deactivate centers and users. Records are deactivated rather than deleted so loan history stays intact.</p>
+<div class="panel"><div class="toolbar"><h2 id="tableTitle">Inventory</h2><div><button id="addReasonButton" class="secondary hidden">+ Add loan reason</button> <button id="addButton" class="hidden"></button></div></div><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
+<p class="muted">Staff and admins can assign equipment, edit a loan's reason or due date, and mark loans returned. Admins can also add loan reasons (on the Loans tab), equipment, centers, maintenance records and users, and deactivate centers and users. Records are deactivated rather than deleted so loan history stays intact.</p>
 </section>
 </main>
 <script>
@@ -134,15 +133,17 @@ function render(tab){
  $("formArea").innerHTML="";
  if(tab==="inventory"){title="Inventory";headers=["ID","Asset Tag","Serial Number","Type","Manufacturer","Model","Status","Center"];rows=data.inventory.map(x=>[x.deviceId,x.assetTag,x.serialNumber,x.deviceType,x.manufacturer,x.model,x.status,x.centerId])}
  else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"].concat(isAdmin()?["Action"]:[]);rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"].concat(isAdmin()?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleCenter("+x.centerId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
- else if(tab==="reasons"){title="Loan Reasons";headers=["ID","Reason"];rows=data.reasons.map(x=>[x.reasonId,x.reasonName])}
  else if(tab==="loans"){title="Loans";headers=["ID","Equipment","Center","Reason","Borrower","Checkout","Due","Returned","Status","Action"];rows=data.loans.map(x=>[x.loanId,deviceName(x.deviceId),centerName(x.centerId),reasonName(x.reasonId),x.participantCode,fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus,x.loanStatus==="RETURNED"?"":{html:actionBtn("Edit","editLoan("+x.loanId+")","secondary")+actionBtn("Mark returned","returnLoan("+x.loanId+")")}])}
  else if(tab==="users"){title="Users";headers=["ID","Email","Role","Active","Action"];rows=data.users.map(x=>[x.userId,x.email,x.role,x.isActive?"Yes":"No",{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleUser("+x.userId+","+!x.isActive+")",x.isActive?"danger":"")}])}
  else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"].concat(isAdmin()?["Action"]:[]);rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus].concat(isAdmin()?[x.maintenanceStatus==="RESOLVED"?"":{html:actionBtn("Mark resolved","resolveMaintenance("+x.maintenanceId+")")}]:[]))}
  $("tableTitle").textContent=title;$("tableContent").innerHTML=table(headers,rows);
+ if(tab==="loans"){$("tableContent").innerHTML+='<h3 style="margin:26px 0 8px">Loan reasons</h3><p class="muted">Pick one of these when assigning equipment. Change it later with Edit on an active loan.</p>'+table(["ID","Reason"],data.reasons.map(x=>[x.reasonId,x.reasonName]))}
+ $("addReasonButton").classList.toggle("hidden",!(tab==="loans"&&isAdmin()));
  const add=$("addButton");const canAdd=ADDABLE[tab]&&(isAdmin()||tab==="loans");
  add.classList.toggle("hidden",!canAdd);if(canAdd)add.textContent="+ "+ADDABLE[tab];
 }
 $("addButton").addEventListener("click",()=>showForm(activeTab));
+$("addReasonButton").addEventListener("click",()=>showForm("reasons"));
 const val=id=>$(id).value.trim();
 function field(id,label,type="text",extra=""){return '<div><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" '+extra+' required></div>'}
 function select(id,label,opts){return '<div><label for="'+id+'">'+label+'</label><select id="'+id+'">'+opts.map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+'</option>').join("")+'</select></div>'}
@@ -166,7 +167,7 @@ function showForm(tab){
   const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName]);
   const reasons=data.reasons.map(r=>[r.reasonId,r.reasonName]);
   if(!devices.length){$("formArea").innerHTML='<div class="error" style="padding:12px;border-radius:7px;margin:12px 0">No equipment is available to loan. Add equipment, or mark an active loan returned or a maintenance record resolved first.</div>';return}
-  if(!centers.length||!reasons.length){const need=[!centers.length?"an outreach center":"",!reasons.length?"a loan reason":""].filter(Boolean).join(" and ");$("formArea").innerHTML='<div id="message" class="error" style="display:block">To assign equipment you first need '+need+'. '+(isAdmin()?"Add it from the "+(!centers.length?"Outreach Centers":"Loan Reasons")+" tab.":"Ask an admin to add it.")+'</div>';return}
+  if(!centers.length||!reasons.length){const need=[!centers.length?"an outreach center":"",!reasons.length?"a loan reason":""].filter(Boolean).join(" and ");$("formArea").innerHTML='<div id="message" class="error" style="display:block">To assign equipment you first need '+need+'. '+(isAdmin()?(!centers.length?"Add it from the Outreach Centers tab.":"Use + Add loan reason above."):"Ask an admin to add it.")+'</div>';return}
   const now=new Date(),due=new Date(now.getTime()+14*864e5),loc=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
   body=select("f_device","Equipment",devices)+select("f_lcenter","Outreach center",centers)+select("f_lreason","Reason",reasons)+
    field("f_code","Borrower","text",'maxlength="50" placeholder="Name or participant ID"')+
