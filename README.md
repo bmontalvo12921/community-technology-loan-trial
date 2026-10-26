@@ -1,15 +1,56 @@
-# Community Outreach Technology Loan API
+# Community Outreach Technology Loan
 
-## Sign in and administrator account setup
+City of Orlando portal for lending laptops, tablets and hotspots through outreach centers. It is a Fastify/TypeScript API with a single-page staff portal (`frontend/index.html`) served at `/`, backed by MySQL. JSON fields use camelCase; the MySQL repository maps them to snake_case columns. Everything is scoped to the `city-of-orlando` tenant.
 
-The repository contains both the API backend and a frontend folder. The API accepts sign-in requests at `POST /v1/auth/login`; it does not provide a built-in username or password. Create an administrator account for your own database, then use that email and password to sign in. Never put real credentials in this README or commit them to Git.
+## Staff portal
 
-1. Install the dependencies and copy `.env.example` to `.env`. Add your database connection values and a private `JWT_SECRET` of at least 32 characters to `.env`.
-2. Set up the database tables using the project schema and migration instructions.
-3. Run `npx tsx src/create-admin.ts`. Enter the administrator email and choose a password when prompted. The password is hidden while typing and must be 12–256 characters. The account is assigned to the `city-of-orlando` tenant.
-4. Start the API with `npm run dev`.
+Open `/` and sign in with a staff or admin account. Tabs: Inventory, Outreach Centers, Loans, Maintenance, and Users (admins only).
 
-For API clients, send the login email and password as JSON:
+- **Loans:** assign equipment (pick a device, center and reason, type the borrower's name or participant ID, set the due date), edit an active loan's reason or due date, and mark it returned. Loan reasons are listed under the loans table; admins add new ones with "+ Add loan reason".
+- **Admins** can also add equipment, centers, maintenance records and users, deactivate centers and users, and resolve maintenance.
+- Records are deactivated, not deleted, so loan history stays intact. Borrowers are free text, not accounts.
+
+| Role | Can do |
+| --- | --- |
+| `STAFF` | Read inventory, centers, loans, loan reasons and maintenance; create, edit and return loans |
+| `ADMIN` | Everything staff can, plus write inventory, centers, loan reasons, maintenance and users |
+
+## Run locally
+
+```sh
+npm install
+cp .env.example .env      # Windows: copy .env.example .env
+```
+
+Fill in `.env`, then create the tables and accounts and start the API:
+
+```sh
+npm run build
+SETUP_ADMIN_EMAIL=you@example.gov SETUP_ADMIN_PASSWORD='at-least-12-characters' npm run db:setup
+npm run dev
+```
+
+| Variable | Purpose |
+| --- | --- |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | MySQL connection |
+| `JWT_SECRET` | Private signing key, at least 32 characters (add it to `.env`; it is not in `.env.example`) |
+| `PORT` | Listen port, default `3020` |
+| `NODE_ENV` | `production` disables `/v1/dev/token` |
+| `SETUP_ADMIN_EMAIL`, `SETUP_ADMIN_PASSWORD` | Admin account created by `db:setup` if missing (password 12-256 characters) |
+| `SETUP_STAFF_EMAIL`, `SETUP_STAFF_PASSWORD` | Optional staff account created the same way |
+
+`npm run db:setup` (`src/setup-database.ts`) is safe to repeat. It creates the tables if they do not exist, adds five default loan reasons (Job search, School or education, Telehealth or medical appointment, Government services, Other) only when none exist, and creates the accounts above if their emails are missing. `npm start` runs it before the server. Remove the `SETUP_*` variables once the accounts exist, and never commit real credentials. You can also create accounts with `npx tsx src/create-admin.ts` and `src/create-staff.ts`.
+
+## Deploy on Railway
+
+1. Add a MySQL service to the project.
+2. On the API service, set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` as reference variables to the MySQL service, plus `JWT_SECRET` and `NODE_ENV=production`.
+3. For the first deploy also set the `SETUP_*` variables, then delete them.
+4. The start command is `npm start`; `/health` returns `{"status":"ok"}` and works as a health check path.
+
+## Sign in
+
+`POST /v1/auth/login` takes `{ "email", "password" }` and returns `{ "token", "user": { "role" } }`. The bearer token is valid for 15 minutes; send it as `Authorization: Bearer <token>`. Invalid credentials return `401`, and login attempts are rate limited.
 
 ```sh
 curl -X POST http://127.0.0.1:3020/v1/auth/login \
@@ -17,19 +58,7 @@ curl -X POST http://127.0.0.1:3020/v1/auth/login \
   -d '{"email":"YOUR_ADMIN_EMAIL","password":"YOUR_PASSWORD"}'
 ```
 
-A successful sign-in returns a bearer token valid for 15 minutes. Use it in `Authorization: Bearer <token>` for protected API requests. Invalid credentials return `401`, and login attempts are rate limited. The password and token are private; do not paste real values into GitHub.
-
-
-
-Fastify/TypeScript API for tenant-scoped outreach centers, devices, loans, loan reasons, and maintenance. JSON fields use camelCase; a MySQL repository maps them to snake_case columns.
-
-## Run
-
-```sh
-npm install
-copy .env.example .env
-npm run dev
-```
+## API reference
 
 All `/v1` endpoints except the development token endpoint require `Authorization: Bearer <JWT>`. Successful resource responses use `{ "data": ... }`. Paginated responses also contain `{ "page": { "limit": 25, "nextCursor": null } }`. Errors use `{ "error": string, "requestId": string }` and include validation details when applicable.
 
@@ -308,6 +337,32 @@ Protected endpoints can return `400` for invalid input, `401` for missing or inv
 - Response: `200` with the `RESOLVED` record; the device becomes `AVAILABLE`.
 - Errors: `404` when the record does not exist; `409` when already resolved or another active maintenance record exists for the device.
 
+## Users
+
+### GET `/v1/users`
+
+- Use case: List accounts in the tenant.
+- Authentication: JWT required.
+- Required role: `users:read` (admin).
+- Response: `200` with `{ userId, email, role, isActive }` entries.
+
+### POST `/v1/users`
+
+- Use case: Create an account.
+- Authentication: JWT required.
+- Required role: `users:write` (admin).
+- Request body: `email`, `password` (12-256 characters) and `role` (`ADMIN` or `STAFF`).
+- Response: `201` with the new user.
+- Errors: `409` when the email already exists.
+
+### PATCH `/v1/users/{userId}`
+
+- Use case: Activate or deactivate an account.
+- Authentication: JWT required.
+- Required role: `users:write` (admin).
+- Request body: `isActive` (boolean).
+- Errors: `400` when you try to deactivate your own account.
+
 ## Development Authentication
 
 ### POST `/v1/dev/token`
@@ -324,12 +379,12 @@ Protected endpoints can return `400` for invalid input, `401` for missing or inv
 curl -X POST http://127.0.0.1:3020/v1/dev/token -H "content-type: application/json" -d "{\"tenantId\":\"eigen-it\"}"
 ```
 
-## Transaction and schema TODOs
+## Known gaps
 
-- A production MySQL repository must wrap checkout, return, maintenance opening, and maintenance resolution in transactions.
-- A dedicated device-event table is required to record transfers, manual status changes, and edits independently of loans and maintenance.
-- Consider adding `is_active` to `loan_reasons` if reasons need to be retired without deletion.
-- Add a separate readiness endpoint or check for MySQL connectivity.
+- A dedicated device-event table is needed to record transfers, manual status changes and edits independently of loans and maintenance.
+- Consider adding `is_active` to `loan_reasons` to retire reasons without deletion.
+- `/health` does not check MySQL connectivity.
+
 ## Credits
 - [@luismonserratt](https://github.com/luismonserratt) — Added CORS support for frontend integration.
 - [@johnathan-mcallister](https://github.com/johnathan-mcallister) — Original inventory API implementation.
