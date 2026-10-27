@@ -1,0 +1,215 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Community Technology Loan</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px Arial,sans-serif;background:#f2f5f9;color:#1d2939}
+header{background:#142b4a;color:white;padding:22px 28px}header h1{margin:0 0 6px;font-size:23px}
+main{max-width:1200px;margin:auto;padding:24px}.panel,.card{background:white;border:1px solid #dce4ee;border-radius:10px;padding:20px;margin-bottom:18px}
+.login{max-width:430px;margin:55px auto}.field{margin:14px 0}label{display:block;margin-bottom:6px;font-weight:bold}
+input{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
+button{padding:10px 15px;border:0;border-radius:6px;background:#2463a6;color:white;cursor:pointer;margin:3px}
+button:hover{background:#184b80}.secondary{background:#e8eef6;color:#142b4a}
+nav{margin:16px 0}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+.metric{font-size:30px;font-weight:bold;margin-top:10px}.muted{color:#667085;font-size:13px}
+table{border-collapse:collapse;width:100%;background:white}th,td{text-align:left;padding:12px;border-bottom:1px solid #e5e7eb}
+th{background:#f8fafc} .table-wrap{overflow:auto}.hidden{display:none!important}
+#message{padding:12px;border-radius:7px;margin:12px 0;background:#e8f4ff;white-space:pre-wrap}
+.error{background:#fff0ef!important;color:#a32018}.success{background:#e7f7ed!important;color:#17663a}
+body.signed-out{background:#0f2744;min-height:100vh}
+body.signed-out header,body.signed-out #message{display:none}
+body.signed-out main{max-width:none;padding:0}
+.brand{text-align:center;color:#fff;padding:44px 16px 24px}
+.brand .logo{width:40px;height:40px;margin:0 auto 18px;border-radius:8px;background:#f97316;display:flex;align-items:center;justify-content:center}
+.brand .city{font-size:11px;letter-spacing:.12em;color:#b6c8e0;font-weight:bold}
+.brand h1{margin:8px 0 6px;font-size:19px}.brand .sub{font-size:12px;color:#b6c8e0}
+.signin-card{max-width:248px;width:calc(100% - 32px);margin:0 auto;background:#fff;border-radius:6px;padding:18px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.signin-card h2{font-size:14px;margin:0 0 14px}.signin-card .field{margin:10px 0}
+.signin-card label{font-size:11px;font-weight:bold;margin-bottom:5px}.signin-card label span{color:#d92d20}
+.signin-card input{padding:9px;font-size:12px;border-radius:4px}
+.signin-card button{width:100%;margin:6px 0 0;padding:10px;background:#1d4f8a;font-weight:bold;font-size:12px;border-radius:4px}
+#signinError{margin:0 0 10px;padding:9px;border-radius:4px;font-size:12px;background:#fff0ef;color:#a32018}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+.formgrid label{font-size:12px}select{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;background:#fff}
+.danger{background:#b42318}.danger:hover{background:#912018}.small{padding:6px 10px;font-size:13px}
+#formArea form{margin-bottom:20px}
+</style>
+</head>
+<body class="signed-out">
+<header><h1>Community Technology Loan</h1><div>City of Orlando · Inventory Management</div></header>
+<main>
+<div id="message" class="hidden"></div>
+<section id="loginPanel">
+<div class="brand"><div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+<div class="city">CITY OF ORLANDO</div><h1>Community Technology Loan Project</h1><div class="sub">Staff Portal</div></div>
+<div class="signin-card">
+<h2>Sign In</h2>
+<div id="signinError" class="hidden"></div>
+<form id="loginForm">
+<div class="field"><label for="email">Email Address <span>*</span></label><input id="email" type="email" autocomplete="username" required placeholder="yourname@orlando.gov"></div>
+<div class="field"><label for="password">Password <span>*</span></label><input id="password" type="password" autocomplete="current-password" required placeholder="Enter your password"></div>
+<button type="submit" id="loginButton">Sign In</button>
+</form>
+</div>
+</section>
+<section id="appPanel" class="hidden">
+<div class="panel"><strong id="userInfo"></strong><button class="secondary" id="logoutButton">Log out</button><button id="refreshButton">Refresh data</button></div>
+<h2>Overview</h2>
+<div class="cards">
+<div class="card"><div class="muted">Devices</div><div class="metric" id="deviceCount">—</div></div>
+<div class="card"><div class="muted">Available devices</div><div class="metric" id="availableCount">—</div></div>
+<div class="card"><div class="muted">Outreach centers</div><div class="metric" id="centerCount">—</div></div>
+<div class="card"><div class="muted">Loan reasons</div><div class="metric" id="reasonCount">—</div></div>
+</div>
+<nav>
+<button data-tab="inventory">Inventory</button>
+<button data-tab="centers">Outreach Centers</button>
+<button data-tab="reasons">Loan Reasons</button>
+<button data-tab="loans">Loans</button>
+<button data-tab="maintenance">Maintenance</button>
+<button data-tab="users" id="usersTab" class="hidden">Users</button>
+</nav>
+<div class="panel"><div class="toolbar"><h2 id="tableTitle">Inventory</h2><button id="addButton" class="hidden"></button></div><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
+<p class="muted">Staff and admins can assign equipment, edit a loan's reason or due date, and mark loans returned. Admins can also add equipment, centers, loan reasons, maintenance records and users, and deactivate centers and users. Records are deactivated rather than deleted so loan history stays intact.</p>
+</section>
+</main>
+<script>
+const API="";
+let token="",user=null,activeTab="inventory";
+const data={inventory:[],centers:[],reasons:[],loans:[],maintenance:[],users:[]};
+const isAdmin=()=>user&&user.role==="ADMIN";
+const $=id=>document.getElementById(id);
+function message(text,type=""){const el=$("message");el.textContent=text;el.className=type;el.classList.remove("hidden")}
+function clearMessage(){$("message").classList.add("hidden")}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function api(path,options={}){
+ const headers={Accept:"application/json",...(options.body?{"Content-Type":"application/json"}:{}),...(token?{Authorization:"Bearer "+token}:{})};
+ const response=await fetch(API+path,{...options,headers});
+ let body;try{body=await response.json()}catch{body={}}
+ if(!response.ok){const e=Error(body.error||body.message||("HTTP "+response.status+" from "+path));if(body.details){const f=body.details.fieldErrors||{};e.details=Object.entries(f).map(([k,v])=>k+": "+v.join(", ")).join("\n")}throw e}
+ return body;
+}
+function listFrom(body){const d=body.data??body;return Array.isArray(d)?d:(Array.isArray(d.items)?d.items:[])}
+async function load(path){return listFrom(await api(path))}
+$("loginForm").addEventListener("submit",async e=>{
+ e.preventDefault();clearMessage();$("loginButton").disabled=true;$("loginButton").textContent="Signing in…";
+ try{
+  const result=await api("/v1/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});
+  token=result.token;user=result.user;$("password").value="";
+  $("loginPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");document.body.classList.remove("signed-out");$("signinError").classList.add("hidden");
+  $("userInfo").textContent=user.email+" · "+user.role;$("usersTab").classList.toggle("hidden",!isAdmin());
+  message("Signed in successfully.","success");await refreshData();
+ }catch(err){$("signinError").textContent="Login failed: "+err.message;$("signinError").classList.remove("hidden")}
+ finally{$("loginButton").disabled=false;$("loginButton").textContent="Sign In"}
+});
+$("logoutButton").addEventListener("click",()=>{token="";user=null;Object.keys(data).forEach(k=>data[k]=[]);$("appPanel").classList.add("hidden");$("loginPanel").classList.remove("hidden");document.body.classList.add("signed-out");$("password").value="";clearMessage()});
+$("refreshButton").addEventListener("click",refreshData);
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>render(b.dataset.tab)));
+async function refreshData(){
+ clearMessage();$("tableContent").textContent="Loading data…";
+ const paths={inventory:"/v1/inventory?limit=100",centers:"/v1/centers?limit=100",reasons:"/v1/loan-reasons?limit=100",loans:"/v1/loans?limit=100",maintenance:"/v1/maintenance?limit=100"};
+ if(isAdmin())paths.users="/v1/users";
+ const results=await Promise.allSettled(Object.entries(paths).map(async([k,p])=>{data[k]=await load(p);return k}));
+ const failures=results.map((r,i)=>r.status==="rejected"?Object.keys(paths)[i]+": "+r.reason.message:null).filter(Boolean);
+ $("deviceCount").textContent=data.inventory.length;
+ $("availableCount").textContent=data.inventory.filter(x=>x.status==="AVAILABLE").length;
+ $("centerCount").textContent=data.centers.length;$("reasonCount").textContent=data.reasons.length;
+ render(activeTab);
+ if(failures.length)message("Some sections could not load:\n"+failures.join("\n"),"error");
+}
+function table(headers,rows){if(!rows.length)return "<p>No records found.</p>";return "<table><thead><tr>"+headers.map(x=>"<th>"+esc(x)+"</th>").join("")+"</tr></thead><tbody>"+rows.map(row=>"<tr>"+row.map(x=>"<td>"+(x&&x.html?x.html:esc(x??""))+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
+const nameOf=(list,key,id,label)=>{const x=list.find(i=>i[key]===id);return x?label(x):String(id)};
+const deviceName=id=>nameOf(data.inventory,"deviceId",id,d=>d.assetTag+" · "+d.manufacturer+" "+d.model);
+const centerName=id=>nameOf(data.centers,"centerId",id,c=>c.centerName);
+const reasonName=id=>nameOf(data.reasons,"reasonId",id,r=>r.reasonName);
+const fmt=v=>v?new Date(v).toLocaleString([],{dateStyle:"medium",timeStyle:"short"}):"";
+const ADDABLE={inventory:"Add equipment",centers:"Add center",reasons:"Add loan reason",loans:"Assign equipment (new loan)",maintenance:"Add maintenance record",users:"Add user"};
+function actionBtn(label,fn,cls=""){return '<button class="small '+cls+'" onclick="'+fn+'">'+label+'</button>'}
+function render(tab){
+ activeTab=tab;let title,headers,rows;
+ $("formArea").innerHTML="";
+ if(tab==="inventory"){title="Inventory";headers=["ID","Asset Tag","Serial Number","Type","Manufacturer","Model","Status","Center"];rows=data.inventory.map(x=>[x.deviceId,x.assetTag,x.serialNumber,x.deviceType,x.manufacturer,x.model,x.status,x.centerId])}
+ else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"].concat(isAdmin()?["Action"]:[]);rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"].concat(isAdmin()?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleCenter("+x.centerId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
+ else if(tab==="reasons"){title="Loan Reasons";headers=["ID","Reason"];rows=data.reasons.map(x=>[x.reasonId,x.reasonName])}
+ else if(tab==="loans"){title="Loans";headers=["ID","Equipment","Center","Reason","Borrower","Checkout","Due","Returned","Status","Action"];rows=data.loans.map(x=>[x.loanId,deviceName(x.deviceId),centerName(x.centerId),reasonName(x.reasonId),x.participantCode,fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus,x.loanStatus==="RETURNED"?"":{html:actionBtn("Edit","editLoan("+x.loanId+")","secondary")+actionBtn("Mark returned","returnLoan("+x.loanId+")")}])}
+ else if(tab==="users"){title="Users";headers=["ID","Email","Role","Active","Action"];rows=data.users.map(x=>[x.userId,x.email,x.role,x.isActive?"Yes":"No",{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleUser("+x.userId+","+!x.isActive+")",x.isActive?"danger":"")}])}
+ else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"].concat(isAdmin()?["Action"]:[]);rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus].concat(isAdmin()?[x.maintenanceStatus==="RESOLVED"?"":{html:actionBtn("Mark resolved","resolveMaintenance("+x.maintenanceId+")")}]:[]))}
+ $("tableTitle").textContent=title;$("tableContent").innerHTML=table(headers,rows);
+ const add=$("addButton");const canAdd=ADDABLE[tab]&&(isAdmin()||tab==="loans");
+ add.classList.toggle("hidden",!canAdd);if(canAdd)add.textContent="+ "+ADDABLE[tab];
+}
+$("addButton").addEventListener("click",()=>showForm(activeTab));
+const val=id=>$(id).value.trim();
+function field(id,label,type="text",extra=""){return '<div><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" '+extra+' required></div>'}
+function select(id,label,opts){return '<div><label for="'+id+'">'+label+'</label><select id="'+id+'">'+opts.map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+'</option>').join("")+'</select></div>'}
+function showForm(tab){
+ let body,submit;
+ if(tab==="inventory"){
+  const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName]);
+  if(!centers.length){message("Add an outreach center first. Equipment must belong to a center.","error");return}
+  body=field("f_asset","Asset tag","text",'maxlength="50"')+field("f_serial","Serial number","text",'maxlength="100"')+
+   select("f_type","Type",[["LAPTOP","Laptop"],["TABLET","Tablet"],["HOTSPOT","Hotspot"]])+field("f_make","Manufacturer","text",'maxlength="100"')+field("f_model","Model","text",'maxlength="100"')+
+   select("f_status","Status",[["AVAILABLE","Available"],["MAINTENANCE","Maintenance"]])+select("f_center","Outreach center",centers);
+  submit=()=>["/v1/inventory",{assetTag:val("f_asset"),serialNumber:val("f_serial"),deviceType:$("f_type").value,manufacturer:val("f_make"),model:val("f_model"),status:$("f_status").value,centerId:Number($("f_center").value)}];
+ }else if(tab==="centers"){
+  body=field("f_name","Center name","text",'maxlength="100"')+field("f_addr","Address","text",'maxlength="255"')+field("f_phone","Phone","tel",'maxlength="20"');
+  submit=()=>["/v1/centers",{centerName:val("f_name"),address:val("f_addr"),phone:val("f_phone"),isActive:true}];
+ }else if(tab==="reasons"){
+  body=field("f_reason","Reason","text",'maxlength="100" placeholder="e.g. Job search"');
+  submit=()=>["/v1/loan-reasons",{reasonName:val("f_reason")}];
+ }else if(tab==="loans"){
+  const devices=data.inventory.filter(d=>d.status==="AVAILABLE").map(d=>[d.deviceId,d.assetTag+" · "+d.manufacturer+" "+d.model]);
+  const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName]);
+  const reasons=data.reasons.map(r=>[r.reasonId,r.reasonName]);
+  if(!devices.length){$("formArea").innerHTML='<div class="error" style="padding:12px;border-radius:7px;margin:12px 0">No equipment is available to loan. Add equipment, or mark an active loan returned or a maintenance record resolved first.</div>';return}
+  if(!centers.length||!reasons.length){const need=[!centers.length?"an outreach center":"",!reasons.length?"a loan reason":""].filter(Boolean).join(" and ");$("formArea").innerHTML='<div id="message" class="error" style="display:block">To assign equipment you first need '+need+'. '+(isAdmin()?"Add it from the "+(!centers.length?"Outreach Centers":"Loan Reasons")+" tab.":"Ask an admin to add it.")+'</div>';return}
+  const now=new Date(),due=new Date(now.getTime()+14*864e5),loc=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
+  body=select("f_device","Equipment",devices)+select("f_lcenter","Outreach center",centers)+select("f_lreason","Reason",reasons)+
+   field("f_code","Borrower","text",'maxlength="50" placeholder="Name or participant ID"')+
+   field("f_out","Checkout","datetime-local",'value="'+loc(now)+'"')+field("f_due","Due","datetime-local",'value="'+loc(due)+'"');
+  submit=()=>["/v1/loans",{deviceId:Number($("f_device").value),centerId:Number($("f_lcenter").value),reasonId:Number($("f_lreason").value),participantCode:val("f_code"),checkoutDate:new Date($("f_out").value).toISOString(),dueDate:new Date($("f_due").value).toISOString()}];
+ }else if(tab==="maintenance"){
+  const devices=data.inventory.map(d=>[d.deviceId,d.assetTag+" · "+d.manufacturer+" "+d.model]);
+  if(!devices.length){message("Add equipment first.","error");return}
+  body=select("f_mdev","Equipment",devices)+field("f_issue","Issue","text",'maxlength="1000"')+field("f_sdate","Service date","date",'value="'+new Date().toISOString().slice(0,10)+'"');
+  submit=()=>["/v1/maintenance",{deviceId:Number($("f_mdev").value),issueDescription:val("f_issue"),serviceDate:$("f_sdate").value}];
+ }else{
+  body=field("f_email","Email","email",'maxlength="255" placeholder="name@orlando.gov"')+field("f_pass","Password (12+ characters)","password",'minlength="12" maxlength="256" autocomplete="new-password"')+
+   select("f_role","Role",[["STAFF","Staff (view only)"],["ADMIN","Admin (add and edit)"]]);
+  submit=()=>["/v1/users",{email:val("f_email"),password:$("f_pass").value,role:$("f_role").value}];
+ }
+ $("formArea").innerHTML='<form id="addForm"><div class="formgrid">'+body+'</div><button type="submit">Save</button><button type="button" class="secondary" id="cancelForm">Cancel</button></form>';
+ $("cancelForm").onclick=()=>{$("formArea").innerHTML=""};
+ $("addForm").addEventListener("submit",async e=>{
+  e.preventDefault();clearMessage();const [path,payload]=submit();
+  try{await api(path,{method:"POST",body:JSON.stringify(payload)});message("Saved.","success");await refreshData()}
+  catch(err){message("Could not save: "+err.message+(err.details?"\n"+err.details:""),"error")}
+ });
+}
+async function toggleCenter(id,active){try{await api("/v1/centers/"+id,{method:"PATCH",body:JSON.stringify({isActive:active})});await refreshData()}catch(err){message("Could not update: "+err.message,"error")}}
+function editLoan(id){
+ const loan=data.loans.find(l=>l.loanId===id);if(!loan)return;
+ const reasons=data.reasons.map(r=>[r.reasonId,r.reasonName]);
+ const loc=iso=>{const d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16)};
+ $("formArea").innerHTML='<form id="editForm"><p class="muted">Editing loan #'+id+' for '+esc(loan.participantCode)+' · '+esc(deviceName(loan.deviceId))+'</p><div class="formgrid">'+select("e_reason","Reason for loan",reasons)+field("e_due","Due","datetime-local",'value="'+loc(loan.dueDate)+'"')+'</div><button type="submit">Save changes</button><button type="button" class="secondary" id="cancelEdit">Cancel</button></form>';
+ $("e_reason").value=String(loan.reasonId);
+ $("cancelEdit").onclick=()=>{$("formArea").innerHTML=""};
+ $("editForm").addEventListener("submit",async e=>{
+  e.preventDefault();clearMessage();
+  const body={};const rid=Number($("e_reason").value);if(rid!==loan.reasonId)body.reasonId=rid;
+  const due=new Date($("e_due").value).toISOString();if(due!==new Date(loan.dueDate).toISOString())body.dueDate=due;
+  if(!Object.keys(body).length){message("Nothing to update.","error");return}
+  try{await api("/v1/loans/"+id,{method:"PATCH",body:JSON.stringify(body)});message("Loan updated.","success");await refreshData()}
+  catch(err){message("Could not update: "+err.message+(err.details?"\n"+err.details:""),"error")}
+ });
+}
+async function returnLoan(id){try{await api("/v1/loans/"+id+"/return",{method:"POST",body:"{}"});message("Loan marked returned.","success");await refreshData()}catch(err){message("Could not update: "+err.message,"error")}}
+async function resolveMaintenance(id){try{await api("/v1/maintenance/"+id+"/resolve",{method:"POST",body:"{}"});message("Maintenance marked resolved.","success");await refreshData()}catch(err){message("Could not update: "+err.message,"error")}}
+async function toggleUser(id,active){try{await api("/v1/users/"+id,{method:"PATCH",body:JSON.stringify({isActive:active})});await refreshData()}catch(err){message("Could not update: "+err.message,"error")}}
+</script>
+</body>
+</html>
