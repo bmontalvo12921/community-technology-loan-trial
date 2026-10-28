@@ -340,7 +340,10 @@ export async function buildApp(
   const portalUrl = new URL("../frontend/index.html", import.meta.url);
   app.get("/", async (_request, reply) => {
     const html = await readFile(portalUrl, "utf8");
-    return reply.type("text/html; charset=utf-8").send(html);
+    return reply
+      .header("Cache-Control", "no-store, no-cache, must-revalidate")
+      .type("text/html; charset=utf-8")
+      .send(html);
   });
 
   /**

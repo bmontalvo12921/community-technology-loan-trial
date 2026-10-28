@@ -198,7 +198,8 @@ function render(tab){
 $("addButton").addEventListener("click",()=>showForm(activeTab));
 const val=id=>$(id).value.trim();
 function field(id,label,type="text",extra=""){return '<div><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" '+extra+' required></div>'}
-function select(id,label,opts){return '<div><label for="'+id+'">'+label+'</label><select id="'+id+'">'+opts.map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+'</option>').join("")+'</select></div>'}
+function select(id,label,opts,required=false){return '<div><label for="'+id+'">'+label+'</label><select id="'+id+'" '+(required?'required':'')+'>'+(required?'<option value="">Select '+esc(label.toLowerCase())+'</option>':'')+opts.map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+'</option>').join("")+'</select></div>'}
+function selectedId(id,label){const raw=$(id)?.value;const n=Number(raw);if(!raw||!Number.isSafeInteger(n)||n<=0)throw Error('Choose a valid '+label+'.');return n}
 function showForm(tab){
  let body,submit;
  if(tab==="inventory"){
@@ -229,11 +230,11 @@ function showForm(tab){
  }else if(tab==="myrequests"){
   const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName+" — "+c.address]);
   if(!centers.length){message("No active outreach centers are available. Please contact staff.","error");return}
-  body=select("f_rcen","Outreach center",centers)+
+  body=select("f_rcen","Outreach center",centers,true)+
    select("f_rtype","What do you need?",[["LAPTOP","Laptop"],["TABLET","Tablet"],["HOTSPOT","Wi-Fi hotspot"]])+
    select("f_rreason","Category (optional)",[["","— none —"]].concat(data.reasons.map(r=>[r.reasonId,r.reasonName])))+
    '<div style="grid-column:1/-1"><label for="f_rtext">Why do you need it?</label><textarea id="f_rtext" maxlength="1000" rows="3" style="width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit" required></textarea></div>';
-  submit=()=>["/v1/me/requests",{centerId:Number($("f_rcen").value),deviceType:$("f_rtype").value,...($("f_rreason").value?{reasonId:Number($("f_rreason").value)}:{}),reasonText:val("f_rtext")}];
+  submit=()=>["/v1/me/requests",{centerId:selectedId("f_rcen","outreach center"),deviceType:$("f_rtype").value,...($("f_rreason").value?{reasonId:Number($("f_rreason").value)}:{}),reasonText:val("f_rtext")}];
  }else if(tab==="maintenance"){
   const devices=data.inventory.map(d=>[d.deviceId,d.assetTag+" · "+d.manufacturer+" "+d.model]);
   if(!devices.length){message("Add equipment first.","error");return}
@@ -247,8 +248,8 @@ function showForm(tab){
  $("formArea").innerHTML='<form id="addForm"><div class="formgrid">'+body+'</div><button type="submit">Save</button><button type="button" class="secondary" id="cancelForm">Cancel</button></form>';
  $("cancelForm").onclick=()=>{$("formArea").innerHTML=""};
  $("addForm").addEventListener("submit",async e=>{
-  e.preventDefault();clearMessage();const [path,payload]=submit();
-  try{await api(path,{method:"POST",body:JSON.stringify(payload)});message("Saved.","success");await refreshData()}
+  e.preventDefault();clearMessage();
+  try{const [path,payload]=submit();await api(path,{method:"POST",body:JSON.stringify(payload)});message("Saved.","success");await refreshData()}
   catch(err){message("Could not save: "+err.message+(err.details?"\n"+err.details:""),"error")}
  });
 }
