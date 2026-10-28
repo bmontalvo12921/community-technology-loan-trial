@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { db } from "./db.js";
 import { hashPassword } from "./password.js";
+import { createAccount } from "./auth-service.js";
 
 const execFileAsync = promisify(execFile);
 const TENANT_ID = "city-of-orlando";
@@ -49,16 +50,11 @@ async function main(): Promise<void> {
 
     const passwordHash = await hashPassword(password);
 
-    const [result] = await db.execute(
-      `INSERT INTO users
-        (tenant_id, email, password_hash, role, is_active,
-         failed_login_attempts, locked_at)
-       VALUES (?, ?, ?, 'STAFF', 1, 0, NULL)`,
-      [TENANT_ID, email, passwordHash]
-    );
+    const result = await createAccount(TENANT_ID, email, passwordHash, "STAFF");
+    if (!result.success) throw new Error("An account with this email already exists for this tenant.");
 
     console.log("Staff account created successfully.");
-    console.log("User ID:", (result as { insertId: number }).insertId);
+    console.log("User ID:", result.user.id);
     console.log("Email:", email);
     console.log("Tenant:", TENANT_ID);
     console.log("Role: STAFF");

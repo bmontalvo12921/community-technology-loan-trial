@@ -5,6 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { db } from "./db.js";
 import { hashPassword } from "./password.js";
+import { createAccount } from "./auth-service.js";
 
 const execFileAsync = promisify(execFile);
 const TENANT_ID = "city-of-orlando";
@@ -65,15 +66,11 @@ async function main(): Promise<void> {
 
     const passwordHash = await hashPassword(password);
 
-    const [result] = await db.execute(
-      `INSERT INTO users
-         (tenant_id, email, password_hash, role, is_active)
-       VALUES (?, ?, ?, 'ADMIN', 1)`,
-      [TENANT_ID, email, passwordHash],
-    );
+    const result = await createAccount(TENANT_ID, email, passwordHash, "ADMIN");
+    if (!result.success) throw new Error("An account with that email already exists.");
 
     console.log("Administrator account created successfully.");
-    console.log(`User ID: ${(result as { insertId: number }).insertId}`);
+    console.log(`User ID: ${result.user.id}`);
     console.log(`Email: ${email}`);
     console.log(`Tenant: ${TENANT_ID}`);
     console.log("Role: ADMIN");

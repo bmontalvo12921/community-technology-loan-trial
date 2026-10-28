@@ -73,16 +73,16 @@ body.signed-out main{max-width:none;padding:0}
 <div class="card"><div class="muted">Loan reasons</div><div class="metric" id="reasonCount">—</div></div>
 </div>
 <nav>
-<button data-tab="myloans" class="user-only">My Equipment</button>
-<button data-tab="myrequests" class="user-only">My Requests</button>
-<button data-tab="centers" class="user-only">Outreach Centers</button>
-<button data-tab="requests" class="staff-only">Requests</button>
-<button data-tab="inventory" class="staff-only">Inventory</button>
-<button data-tab="centers" class="staff-only">Outreach Centers</button>
-<button data-tab="reasons" class="staff-only">Loan Reasons</button>
-<button data-tab="loans" class="staff-only">Loans</button>
-<button data-tab="maintenance" class="staff-only">Maintenance</button>
-<button data-tab="users" id="usersTab" class="hidden">Users</button>
+<button data-tab="myloans" data-permission="my-loans:read" class="user-only">My Equipment</button>
+<button data-tab="myrequests" data-permission="my-requests:read" class="user-only">My Requests</button>
+<button data-tab="centers" data-permission="centers:read" class="user-only">Outreach Centers</button>
+<button data-tab="requests" data-permission="requests:read" class="staff-only">Requests</button>
+<button data-tab="inventory" data-permission="inventory:read" class="staff-only">Inventory</button>
+<button data-tab="centers" data-permission="centers:read" class="staff-only">Outreach Centers</button>
+<button data-tab="reasons" data-permission="loan-reasons:read" class="staff-only">Loan Reasons</button>
+<button data-tab="loans" data-permission="loans:read" class="staff-only">Loans</button>
+<button data-tab="maintenance" data-permission="maintenance:read" class="staff-only">Maintenance</button>
+<button data-tab="users" id="usersTab" data-permission="users:read" class="hidden">Users</button>
 </nav>
 <div class="panel"><div class="toolbar"><h2 id="tableTitle">Inventory</h2><button id="addButton" class="hidden"></button></div><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
 <p class="muted staff-only">Staff and admins can assign equipment, edit a loan's reason or due date, and mark loans returned. Admins can also add equipment, centers, loan reasons, maintenance records and users, and deactivate centers and users. Records are deactivated rather than deleted so loan history stays intact.</p>
@@ -92,8 +92,8 @@ body.signed-out main{max-width:none;padding:0}
 const API="";
 let token="",user=null,activeTab="inventory";
 const data={inventory:[],centers:[],reasons:[],loans:[],maintenance:[],users:[],requests:[],myloans:[],myrequests:[]};
-const isAdmin=()=>user&&user.role==="ADMIN";
 const isUser=()=>user&&user.role==="USER";
+const can=permission=>Boolean(user&&user.permissions&&user.permissions.includes(permission));
 const $=id=>document.getElementById(id);
 function message(text,type=""){const el=$("message");el.textContent=text;el.className=type;el.classList.remove("hidden")}
 function clearMessage(){$("message").classList.add("hidden")}
@@ -111,8 +111,9 @@ async function enter(result){
  token=result.token;user=result.user;
  $("loginPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");document.body.classList.remove("signed-out");$("signinError").classList.add("hidden");
  document.body.classList.toggle("role-user",isUser());
- $("userInfo").textContent=user.email+" · "+user.role;$("usersTab").classList.toggle("hidden",!isAdmin());
- activeTab=isUser()?"myloans":(user.role==="STAFF"?"requests":"inventory");
+ $("userInfo").textContent=user.email+" · "+user.role;
+ document.querySelectorAll("[data-permission]").forEach(el=>el.classList.toggle("hidden",!can(el.dataset.permission)));
+ activeTab=isUser()?"myloans":(user.role==="STAFF"&&can("requests:read")?"requests":"inventory");
  await refreshData();
 }
 function authError(text){$("signinError").textContent=text;$("signinError").classList.remove("hidden")}
@@ -146,7 +147,20 @@ $("refreshButton").addEventListener("click",refreshData);
 document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>render(b.dataset.tab)));
 async function refreshData(){
  clearMessage();$("tableContent").textContent="Loading data…";
- const paths=isUser()?{centers:"/v1/centers?limit=100",reasons:"/v1/loan-reasons",myloans:"/v1/me/loans",myrequests:"/v1/me/requests"}:{inventory:"/v1/inventory?limit=100",centers:"/v1/centers?limit=100",reasons:"/v1/loan-reasons?limit=100",loans:"/v1/loans?limit=100",maintenance:"/v1/maintenance?limit=100",requests:"/v1/requests",users:"/v1/users"};
+ const paths=isUser()?{
+  ...(can("centers:read")?{centers:"/v1/centers?limit=100"}:{}),
+  ...(can("loan-reasons:read")?{reasons:"/v1/loan-reasons"}:{}),
+  ...(can("my-loans:read")?{myloans:"/v1/me/loans"}:{}),
+  ...(can("my-requests:read")?{myrequests:"/v1/me/requests"}:{})
+ }:{
+  ...(can("inventory:read")?{inventory:"/v1/inventory?limit=100"}:{}),
+  ...(can("centers:read")?{centers:"/v1/centers?limit=100"}:{}),
+  ...(can("loan-reasons:read")?{reasons:"/v1/loan-reasons?limit=100"}:{}),
+  ...(can("loans:read")?{loans:"/v1/loans?limit=100"}:{}),
+  ...(can("maintenance:read")?{maintenance:"/v1/maintenance?limit=100"}:{}),
+  ...(can("requests:read")?{requests:"/v1/requests"}:{}),
+  ...(can("users:read")?{users:"/v1/users"}:{})
+ };
  const results=await Promise.allSettled(Object.entries(paths).map(async([k,p])=>{data[k]=await load(p);return k}));
  const failures=results.map((r,i)=>r.status==="rejected"?Object.keys(paths)[i]+": "+r.reason.message:null).filter(Boolean);
  $("deviceCount").textContent=data.inventory.length;
@@ -168,16 +182,17 @@ function render(tab){
  activeTab=tab;let title,headers,rows;
  $("formArea").innerHTML="";
  if(tab==="myloans"){title="My Equipment";headers=["Equipment","Type","Checked out","Due","Returned","Status"];rows=data.myloans.map(x=>[x.device?x.device.assetTag+" · "+x.device.manufacturer+" "+x.device.model:x.deviceId,x.device?x.device.deviceType:"",fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus])}
- else if(tab==="myrequests"){title="My Requests";headers=["#","Equipment type","Outreach center","Reason","Submitted","Status",""];rows=data.myrequests.map(x=>[x.requestId,x.deviceType,centerName(x.centerId),requestReason(x),fmt(x.createdAt),x.status,x.status==="PENDING"?{html:actionBtn("Cancel","cancelRequest("+x.requestId+")","secondary")} : ""])}
- else if(tab==="requests"){title="Equipment Requests";headers=["#","User","Type wanted","Outreach center","Reason","Submitted","Status","Action"];rows=data.requests.map(x=>[x.requestId,x.userEmail,x.deviceType,centerName(x.centerId),requestReason(x),fmt(x.createdAt),x.status,x.status==="PENDING"?{html:actionBtn("Assign","approveRequest("+x.requestId+")")+actionBtn("Deny","denyRequest("+x.requestId+")","danger")} : ""])}
+ else if(tab==="myrequests"){title="My Requests";headers=["#","Equipment type","Outreach center","Reason","Submitted","Status"].concat(can("my-requests:write")?[""]:[]);rows=data.myrequests.map(x=>[x.requestId,x.deviceType,centerName(x.centerId),requestReason(x),fmt(x.createdAt),x.status].concat(can("my-requests:write")?[x.status==="PENDING"?{html:actionBtn("Cancel","cancelRequest("+x.requestId+")","secondary")} : ""]:[]))}
+ else if(tab==="requests"){title="Equipment Requests";headers=["#","User","Type wanted","Outreach center","Reason","Submitted","Status"].concat(can("requests:write")?["Action"]:[]);rows=data.requests.map(x=>[x.requestId,x.userEmail,x.deviceType,centerName(x.centerId),requestReason(x),fmt(x.createdAt),x.status].concat(can("requests:write")?[x.status==="PENDING"?{html:actionBtn("Assign","approveRequest("+x.requestId+")")+actionBtn("Deny","denyRequest("+x.requestId+")","danger")} : ""]:[]))}
  else if(tab==="inventory"){title="Inventory";headers=["ID","Asset Tag","Serial Number","Type","Manufacturer","Model","Status","Center"];rows=data.inventory.map(x=>[x.deviceId,x.assetTag,x.serialNumber,x.deviceType,x.manufacturer,x.model,x.status,x.centerId])}
- else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"].concat(isAdmin()?["Action"]:[]);rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"].concat(isAdmin()?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleCenter("+x.centerId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
  else if(tab==="reasons"){title="Loan Reasons";headers=["ID","Reason"];rows=data.reasons.map(x=>[x.reasonId,x.reasonName])}
- else if(tab==="loans"){title="Loans";headers=["ID","Equipment","Center","Reason","Borrower","Checkout","Due","Returned","Status","Action"];rows=data.loans.map(x=>[x.loanId,deviceName(x.deviceId),centerName(x.centerId),reasonName(x.reasonId),x.participantCode,fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus,x.loanStatus==="RETURNED"?"":{html:actionBtn("Edit","editLoan("+x.loanId+")","secondary")+actionBtn("Mark returned","returnLoan("+x.loanId+")")}])}
- else if(tab==="users"){title="Users";headers=["ID","Email","Role","Active","Action"];rows=data.users.map(x=>[x.userId,x.email,x.role,x.isActive?"Yes":"No",{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleUser("+x.userId+","+!x.isActive+")",x.isActive?"danger":"")}])}
- else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"].concat(isAdmin()?["Action"]:[]);rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus].concat(isAdmin()?[x.maintenanceStatus==="RESOLVED"?"":{html:actionBtn("Mark resolved","resolveMaintenance("+x.maintenanceId+")")}]:[]))}
+ else if(tab==="loans"){title="Loans";headers=["ID","Equipment","Center","Reason","Borrower","Checkout","Due","Returned","Status"].concat(can("loans:write")?["Action"]:[]);rows=data.loans.map(x=>[x.loanId,deviceName(x.deviceId),centerName(x.centerId),reasonName(x.reasonId),x.participantCode,fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus].concat(can("loans:write")?[x.loanStatus==="RETURNED"?"":{html:actionBtn("Edit","editLoan("+x.loanId+")","secondary")+actionBtn("Mark returned","returnLoan("+x.loanId+")")}]:[]))}
+ else if(tab==="users"){title="Users";headers=["ID","Email","Role","Active"].concat(can("users:write")?["Action"]:[]);rows=data.users.map(x=>[x.userId,x.email,x.role,x.isActive?"Yes":"No"].concat(can("users:write")?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleUser("+x.userId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
+ else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"].concat(can("centers:write")?["Action"]:[]);rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"].concat(can("centers:write")?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleCenter("+x.centerId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
+ else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"].concat(can("maintenance:write")?["Action"]:[]);rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus].concat(can("maintenance:write")?[x.maintenanceStatus==="RESOLVED"?"":{html:actionBtn("Mark resolved","resolveMaintenance("+x.maintenanceId+")")}]:[]))}
  $("tableTitle").textContent=title;$("tableContent").innerHTML=table(headers,rows);
- const add=$("addButton");const canAdd=ADDABLE[tab]&&(isAdmin()||(user.role==="STAFF"&&tab==="inventory")||tab==="myrequests");
+ const addPermission={myrequests:"my-requests:write",inventory:"inventory:write",centers:"centers:write",reasons:"loan-reasons:write",loans:"loans:assign",maintenance:"maintenance:write",users:"users:write"};
+ const add=$("addButton");const canAdd=Boolean(ADDABLE[tab]&&can(addPermission[tab]));
  add.classList.toggle("hidden",!canAdd);if(canAdd)add.textContent="+ "+ADDABLE[tab];
 }
 $("addButton").addEventListener("click",()=>showForm(activeTab));
@@ -204,7 +219,7 @@ function showForm(tab){
   const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName]);
   const reasons=data.reasons.map(r=>[r.reasonId,r.reasonName]);
   if(!devices.length){$("formArea").innerHTML='<div class="error" style="padding:12px;border-radius:7px;margin:12px 0">No equipment is available to loan. Add equipment, or mark an active loan returned or a maintenance record resolved first.</div>';return}
-  if(!centers.length||!reasons.length){const need=[!centers.length?"an outreach center":"",!reasons.length?"a loan reason":""].filter(Boolean).join(" and ");$("formArea").innerHTML='<div id="message" class="error" style="display:block">To assign equipment you first need '+need+'. '+(isAdmin()?"Add it from the "+(!centers.length?"Outreach Centers":"Loan Reasons")+" tab.":"Ask an admin to add it.")+'</div>';return}
+  if(!centers.length||!reasons.length){const need=[!centers.length?"an outreach center":"",!reasons.length?"a loan reason":""].filter(Boolean).join(" and ");$("formArea").innerHTML='<div id="message" class="error" style="display:block">To assign equipment you first need '+need+'. '+(can("centers:write")||can("loan-reasons:write")?"Add it from the relevant tab.":"Ask an admin to add it.")+'</div>';return}
   const now=new Date(),due=new Date(now.getTime()+14*864e5),loc=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
   body=select("f_device","Equipment",devices)+select("f_lcenter","Outreach center",centers)+select("f_lreason","Reason",reasons)+
    select("f_user","Assign to user account",[["","None (walk-in, enter name below)"]].concat(data.users.filter(u=>u.role==="USER"&&u.isActive).map(u=>[u.userId,u.email])))+

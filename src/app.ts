@@ -20,7 +20,7 @@ import {
 } from "./request-service.js";
 
 import { MySqlInventoryRepository } from "./mysql-inventory-repository.js";
-import { authenticateUser, registerUser, ROLE_PERMISSIONS } from "./auth-service.js";
+import { authenticateUser, createAccount, registerUser, ROLE_PERMISSIONS } from "./auth-service.js";
 import {
   DEVICE_STATUSES,
   DEVICE_TYPES,
@@ -493,19 +493,31 @@ app.post(
       // (users:write) see staff and admin accounts.
       const isAdmin = request.user.permissions.includes("users:write");
       const [rows] = await db.execute(
-        `SELECT id, email, role, is_active
+        `SELECT id, email, role
            FROM users
           WHERE tenant_id = ?${isAdmin ? "" : " AND role = 'USER'"}
           ORDER BY id`,
         [request.user.tenantId]
       );
+      const profileRows = rows as { id: number | string; email: string; role: string }[];
+      const userIds = profileRows.map((row) => Number(row.id));
+      const activeById = new Map<number, boolean>();
+      if (userIds.length) {
+        const [authRows] = await db.query(
+          "SELECT user_id, is_active FROM user_auth WHERE tenant_id = ? AND user_id IN (?)",
+          [request.user.tenantId, userIds]
+        );
+        for (const row of authRows as { user_id: number | string; is_active: number | boolean }[]) {
+          activeById.set(Number(row.user_id), Boolean(row.is_active));
+        }
+      }
 
       return {
-        data: (rows as any[]).map((row) => ({
+        data: profileRows.map((row) => ({
           userId: Number(row.id),
           email: row.email,
           role: row.role,
-          isActive: Boolean(row.is_active)
+          isActive: activeById.get(Number(row.id)) ?? false
         }))
       };
     }
@@ -518,31 +530,27 @@ app.post(
       const body = parse(userBody, request.body);
       const passwordHash = await hashPassword(body.password);
 
-      try {
-        const [result] = await db.execute(
-          `INSERT INTO users
-             (tenant_id, email, password_hash, role, is_active)
-           VALUES (?, ?, ?, ?, 1)`,
-          [request.user.tenantId, body.email, passwordHash, body.role]
+      const result = await createAccount(
+        request.user.tenantId,
+        body.email,
+        passwordHash,
+        body.role,
+      );
+      if (!result.success) {
+        throw Object.assign(
+          new Error("A user with that email already exists"),
+          { statusCode: 409 }
         );
-
-        return reply.code(201).send({
-          data: {
-            userId: Number((result as { insertId: number }).insertId),
-            email: body.email,
-            role: body.role,
-            isActive: true
-          }
-        });
-      } catch (error) {
-        if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
-          throw Object.assign(
-            new Error("A user with that email already exists"),
-            { statusCode: 409 }
-          );
-        }
-        throw error;
       }
+
+      return reply.code(201).send({
+        data: {
+          userId: Number(result.user.id),
+          email: result.user.email,
+          role: result.user.role,
+          isActive: true
+        }
+      });
     }
   );
 
@@ -567,16 +575,35 @@ app.post(
         );
       }
 
-      const [result] = await db.execute(
-        `UPDATE users SET is_active = ?
-          WHERE id = ? AND tenant_id = ?`,
-        [body.isActive ? 1 : 0, userId, request.user.tenantId]
-      );
-
-      if ((result as { affectedRows: number }).affectedRows === 0) {
-        throw Object.assign(new Error("User not found"), {
-          statusCode: 404
-        });
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [users] = await connection.execute(
+          "SELECT id FROM users WHERE id = ? AND tenant_id = ? FOR UPDATE",
+          [userId, request.user.tenantId]
+        );
+        if (!(users as any[]).length) {
+          await connection.rollback();
+          throw Object.assign(new Error("User not found"), { statusCode: 404 });
+        }
+        const [authRows] = await connection.execute(
+          "SELECT user_id FROM user_auth WHERE user_id = ? AND tenant_id = ? FOR UPDATE",
+          [userId, request.user.tenantId]
+        );
+        if (!(authRows as any[]).length) {
+          await connection.rollback();
+          throw Object.assign(new Error("Authentication record not found for this user"), { statusCode: 409 });
+        }
+        await connection.execute(
+          "UPDATE user_auth SET is_active = ? WHERE user_id = ? AND tenant_id = ?",
+          [body.isActive ? 1 : 0, userId, request.user.tenantId]
+        );
+        await connection.commit();
+      } catch (error) {
+        try { await connection.rollback(); } catch { /* transaction may already be rolled back */ }
+        throw error;
+      } finally {
+        connection.release();
       }
 
       return { data: { userId, isActive: body.isActive } };
@@ -1140,11 +1167,16 @@ app.post(
       if (body.userId !== undefined) {
         const [users] = await db.execute(
           `SELECT email FROM users
-            WHERE id = ? AND tenant_id = ? AND role = 'USER' AND is_active = 1`,
+            WHERE id = ? AND tenant_id = ? AND role = 'USER'`,
           [body.userId, request.user.tenantId]
         );
         const target = (users as { email: string }[])[0];
-        if (!target) {
+        const [authRows] = await db.execute(
+          "SELECT is_active FROM user_auth WHERE user_id = ? AND tenant_id = ?",
+          [body.userId, request.user.tenantId]
+        );
+        const auth = (authRows as { is_active: number | boolean }[])[0];
+        if (!target || !auth?.is_active) {
           throw Object.assign(new Error("User not found"), {
             statusCode: 404
           });

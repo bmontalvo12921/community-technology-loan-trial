@@ -1,12 +1,26 @@
-// Idempotent first-run setup: creates missing tables and, when the
-// SETUP_* variables are present, the first admin and staff accounts.
-// Safe to run on every start. Existing tables and accounts are untouched.
+// Idempotent first-run setup: creates missing tables, migrates legacy login
+// fields into user_auth, and seeds default access templates and accounts.
 import { db } from "./db.js";
 import { hashPassword } from "./password.js";
+import { createAccount, ROLE_PERMISSIONS, type AuthRole } from "./auth-service.js";
 
 const TENANT_ID = "city-of-orlando";
 
 const TABLES: string[] = [
+  `CREATE TABLE IF NOT EXISTS access_templates (
+    template_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100) NOT NULL,
+    template_name VARCHAR(100) NOT NULL,
+    description VARCHAR(255) NULL,
+    PRIMARY KEY (template_id),
+    KEY idx_access_templates_tenant (tenant_id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS access_template_permissions (
+    tenant_id VARCHAR(100) NOT NULL,
+    template_id INT UNSIGNED NOT NULL,
+    permission_key VARCHAR(100) NOT NULL,
+    PRIMARY KEY (tenant_id, template_id, permission_key)
+  ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS outreach_centers (
     center_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(100) NOT NULL,
@@ -85,15 +99,27 @@ const TABLES: string[] = [
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
     role ENUM('ADMIN','STAFF','USER') NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    access_template_id INT UNSIGNED NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_users_tenant_email (tenant_id, email),
+    UNIQUE KEY uq_users_tenant_id (tenant_id, id)
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS user_auth (
+    user_id BIGINT UNSIGNED NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
     failed_login_attempts INT UNSIGNED NOT NULL DEFAULT 0,
     locked_at TIMESTAMP NULL DEFAULT NULL,
     last_login_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uq_users_tenant_email (tenant_id, email)
+    PRIMARY KEY (tenant_id, user_id),
+    UNIQUE KEY uq_user_auth_tenant_email (tenant_id, email),
+    CONSTRAINT fk_user_auth_user FOREIGN KEY (tenant_id, user_id)
+      REFERENCES users (tenant_id, id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS security_audit_log (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -132,6 +158,70 @@ async function migrateForUserAccounts(): Promise<void> {
     "ALTER TABLE users MODIFY role ENUM('ADMIN','STAFF','USER') NOT NULL",
   );
 
+  const [templateColumn] = await db.execute(
+    `SELECT COUNT(*) AS n FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'users'
+        AND column_name = 'access_template_id'`,
+  );
+  if (Number((templateColumn as { n: number }[])[0]?.n ?? 0) === 0) {
+    await db.query("ALTER TABLE users ADD COLUMN access_template_id INT UNSIGNED NULL");
+    console.log("Added users.access_template_id.");
+  }
+
+  // Move legacy credential data into user_auth. Existing auth rows stay authoritative.
+  const [passwordColumn] = await db.execute(
+    `SELECT COUNT(*) AS n FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'users'
+        AND column_name = 'password_hash'`,
+  );
+  if (Number((passwordColumn as { n: number }[])[0]?.n ?? 0) > 0) {
+    await db.query(
+      `INSERT IGNORE INTO user_auth
+         (user_id, tenant_id, email, password_hash, is_active,
+          failed_login_attempts, locked_at, last_login_at, created_at)
+       SELECT id, tenant_id, email, password_hash, is_active,
+              failed_login_attempts, locked_at, last_login_at, created_at
+         FROM users
+        WHERE password_hash IS NOT NULL AND password_hash <> ''`,
+    );
+  }
+
+  const [missingAuth] = await db.execute(
+    `SELECT COUNT(*) AS n
+       FROM users u
+       LEFT JOIN user_auth a ON a.tenant_id = u.tenant_id AND a.user_id = u.id
+      WHERE a.user_id IS NULL`,
+  );
+  const usersWithoutAuth = Number((missingAuth as { n: number }[])[0]?.n ?? 0);
+  if (usersWithoutAuth > 0) {
+    throw new Error(
+      `Cannot finish separating authentication: ${usersWithoutAuth} user profile(s) have no user_auth row.`,
+    );
+  }
+
+  const authOnlyColumns = [
+    "password_hash",
+    "is_active",
+    "failed_login_attempts",
+    "locked_at",
+    "last_login_at",
+  ];
+  const [legacyAuthColumns] = await db.execute(
+    `SELECT column_name FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'users'
+        AND column_name IN
+          ('password_hash', 'is_active', 'failed_login_attempts', 'locked_at', 'last_login_at')`,
+  );
+  const columnsToDrop = (legacyAuthColumns as { column_name: string }[])
+    .map((row) => row.column_name)
+    .filter((column) => authOnlyColumns.includes(column));
+  if (columnsToDrop.length) {
+    await db.query(
+      `ALTER TABLE users ${columnsToDrop.map((column) => `DROP COLUMN ${column}`).join(", ")}`,
+    );
+    console.log("Moved authentication fields from users into user_auth.");
+  }
+
   const [cols] = await db.execute(
     `SELECT COUNT(*) AS n FROM information_schema.columns
       WHERE table_schema = DATABASE() AND table_name = 'loans'
@@ -159,6 +249,66 @@ async function migrateForUserAccounts(): Promise<void> {
         .map((r) => `${r.c} ${r.t}${r.n === "NO" ? " NOT NULL" : ""}`)
         .join(", "),
   );
+}
+
+const ACCESS_ROLES: AuthRole[] = ["USER", "STAFF", "ADMIN"];
+
+async function ensureAccessTemplates(): Promise<void> {
+  const templatesCreatedNow: number[] = [];
+  for (const role of ACCESS_ROLES) {
+    const [insert] = await db.execute(
+      `INSERT INTO access_templates (tenant_id, template_name, description)
+       SELECT ?, ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM access_templates
+           WHERE tenant_id = ? AND UPPER(template_name) = ?
+        )`,
+      [TENANT_ID, role, `Default permissions for ${role.toLowerCase()} accounts.`, TENANT_ID, role],
+    );
+    const created = (insert as { affectedRows: number }).affectedRows > 0;
+
+    const [rows] = await db.execute(
+      `SELECT template_id FROM access_templates
+        WHERE tenant_id = ? AND UPPER(template_name) = ?
+        ORDER BY template_id LIMIT 1`,
+      [TENANT_ID, role],
+    );
+    const templateId = Number((rows as { template_id: number }[])[0]?.template_id);
+    if (!templateId) throw new Error(`Could not create the ${role} access template`);
+    if (created) templatesCreatedNow.push(templateId);
+
+    // Seed defaults only for a newly-created template. Existing rows remain
+    // editable so a removed permission is not re-added on every startup.
+    if (created) {
+      for (const permission of ROLE_PERMISSIONS[role]) {
+        await db.execute(
+          `INSERT IGNORE INTO access_template_permissions
+             (tenant_id, template_id, permission_key)
+           VALUES (?, ?, ?)`,
+          [TENANT_ID, templateId, permission],
+        );
+      }
+    }
+  }
+
+  // Keep valid custom assignments. Repair missing ids and ids that collided with
+  // newly-created default templates after an earlier table reset.
+  const newlyCreatedCondition = templatesCreatedNow.length
+    ? ` OR assigned_template.template_id IN (${templatesCreatedNow.map(() => "?").join(", ")})`
+    : "";
+  await db.execute(
+    `UPDATE users u
+       JOIN access_templates role_template
+         ON role_template.tenant_id = u.tenant_id
+        AND UPPER(role_template.template_name) = u.role
+       LEFT JOIN access_templates assigned_template
+         ON assigned_template.tenant_id = u.tenant_id
+        AND assigned_template.template_id = u.access_template_id
+        SET u.access_template_id = role_template.template_id
+      WHERE assigned_template.template_id IS NULL${newlyCreatedCondition}`,
+    templatesCreatedNow,
+  );
+  console.log("Default access templates and permissions are in place.");
 }
 
 const DEFAULT_REASONS = [
@@ -198,14 +348,8 @@ async function ensureAccount(
   const normalized = email.trim().toLowerCase();
   const hash = await hashPassword(password);
 
-  const [result] = await db.execute(
-    `INSERT IGNORE INTO users
-       (tenant_id, email, password_hash, role, is_active)
-     VALUES (?, ?, ?, ?, 1)`,
-    [TENANT_ID, normalized, hash, role],
-  );
-
-  const created = (result as { affectedRows: number }).affectedRows > 0;
+  const result = await createAccount(TENANT_ID, normalized, hash, role);
+  const created = result.success;
   console.log(
     `${role} account ${normalized}: ${created ? "created" : "already exists"}`,
   );
@@ -216,6 +360,7 @@ try {
     await db.query(statement);
   }
   await migrateForUserAccounts();
+  await ensureAccessTemplates();
   console.log("Database tables are in place.");
   await ensureLoanReasons();
 
