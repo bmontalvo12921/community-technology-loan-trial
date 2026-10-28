@@ -147,6 +147,20 @@ async function migrateForUserAccounts(): Promise<void> {
   }
 
   await db.query(REQUESTS_TABLE);
+
+  // Report the live shape of the table so a mismatch with this code is visible in the deploy logs.
+  const [shape] = await db.query(
+    `SELECT column_name AS c, column_type AS t, is_nullable AS n
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'equipment_requests'
+      ORDER BY ordinal_position`,
+  );
+  console.log(
+    "equipment_requests columns: " +
+      (shape as { c: string; t: string; n: string }[])
+        .map((r) => `${r.c} ${r.t}${r.n === "NO" ? " NOT NULL" : ""}`)
+        .join(", "),
+  );
 }
 
 const DEFAULT_REASONS = [
