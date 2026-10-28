@@ -27,18 +27,16 @@ import {
  */
 declare module "@fastify/jwt" {
   interface FastifyJWT {
-    payload: {
-      sub?: string;
-      tenantId: string;
-      roles: string[];
-    };
-    user: {
-      sub?: string;
-      tenantId: string;
-      roles: string[];
-    };
-  }
-}
+   payload: {
+  sub?: string;
+  tenantId: string;
+  permissions: string[];
+};
+user: {
+  sub?: string;
+  tenantId: string;
+  permissions: string[];
+};
 
 /**
  * Validation helpers
@@ -188,26 +186,18 @@ function parse<S extends z.ZodTypeAny>(
 /**
  * Role authorization
  */
-function requireRole(
-  request: FastifyRequest,
-  role: string
-) {
-  if (!request.user.roles.includes(role)) {
-    throw Object.assign(
-      new Error("Insufficient permissions"),
-      {
-        statusCode: 403
-      }
-    );
+function requirePermission(request: FastifyRequest, permission: string) {
+  if (!request.user.permissions?.includes(permission)) {
+    throw Object.assign(new Error("Insufficient permissions"), {
+      statusCode: 403,
+    });
   }
 }
 
-const authorize =
-  (role: string) =>
+const authorize = (permission: string) =>
   async (request: FastifyRequest) => {
-    requireRole(request, role);
+    requirePermission(request, permission);
   };
-
 /**
  * Pagination response
  */
