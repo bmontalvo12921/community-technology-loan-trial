@@ -277,9 +277,15 @@ async function ensureAccessTemplates(): Promise<void> {
     if (!templateId) throw new Error(`Could not create the ${role} access template`);
     if (created) templatesCreatedNow.push(templateId);
 
-    // Seed defaults only for a newly-created template. Existing rows remain
-    // editable so a removed permission is not re-added on every startup.
-    if (created) {
+    // Seed newly-created or empty default templates. Once a template has any
+    // permission rows, preserve its contents so edits are not overwritten.
+    const [permissionRows] = await db.execute(
+      `SELECT COUNT(*) AS n FROM access_template_permissions
+        WHERE tenant_id = ? AND template_id = ?`,
+      [TENANT_ID, templateId],
+    );
+    const hasPermissions = Number((permissionRows as { n: number }[])[0]?.n ?? 0) > 0;
+    if (created || !hasPermissions) {
       for (const permission of ROLE_PERMISSIONS[role]) {
         await db.execute(
           `INSERT IGNORE INTO access_template_permissions
