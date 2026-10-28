@@ -302,7 +302,9 @@ export async function buildApp(
           err: error,
           requestId: request.id
         },
-        "Request failed"
+        `Request failed: ${request.method} ${request.url.split("?")[0]} - ${
+          (error as { code?: string }).code ?? ""
+        } ${(error as { sqlMessage?: string }).sqlMessage ?? (error as Error).message}`
       );
 
       const known = error as Error & {
