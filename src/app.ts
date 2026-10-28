@@ -352,13 +352,6 @@ export async function buildApp(
   /**
    * Health check
    */
-  app.get(
-    "/health",
-    async () => ({
-      status: "ok"
-    })
-  );
-
 app.post(
   "/v1/auth/login",
   {
@@ -385,14 +378,13 @@ app.post(
       });
     }
 
-    const roles =
-      result.user.role === "ADMIN" ? developmentRoles : staffRoles;
+    const permissions = result.user.permissions;
 
     const token = await reply.jwtSign(
       {
         sub: result.user.id,
         tenantId: result.user.tenantId,
-        roles,
+        permissions,
       },
       { expiresIn: "15m" },
     );
@@ -405,11 +397,11 @@ app.post(
         id: result.user.id,
         email: result.user.email,
         role: result.user.role,
+        permissions,
       },
     };
   },
 );
-
 
   /**
    * JWT authentication hook
