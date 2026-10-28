@@ -37,11 +37,28 @@ function map(row: RowDataPacket): EquipmentRequest {
   };
 }
 
-const SELECT = `SELECT r.request_id, r.user_id, u.email, r.device_type,
+const SELECT = `SELECT r.request_id, r.user_id, r.device_type,
        r.reason_id, r.reason_text, r.status, r.loan_id, r.review_note,
        r.created_at, r.reviewed_at
-  FROM equipment_requests r
-  LEFT JOIN users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id`;
+  FROM equipment_requests r`;
+
+// Emails are looked up separately rather than joined: the users table can
+// have a different collation from equipment_requests on an older database.
+async function withEmails(
+  tenantId: string,
+  rows: RowDataPacket[],
+): Promise<EquipmentRequest[]> {
+  const ids = [...new Set(rows.map((r) => Number(r.user_id)))];
+  const emails = new Map<number, string>();
+  if (ids.length) {
+    const [users] = await db.query<RowDataPacket[]>(
+      "SELECT id, email FROM users WHERE tenant_id = ? AND id IN (?)",
+      [tenantId, ids],
+    );
+    for (const u of users) emails.set(Number(u.id), u.email);
+  }
+  return rows.map((r) => map({ ...r, email: emails.get(Number(r.user_id)) ?? null }));
+}
 
 export async function createRequest(
   tenantId: string,
@@ -77,7 +94,7 @@ export async function getRequest(
     `${SELECT} WHERE r.tenant_id = ? AND r.request_id = ?`,
     [tenantId, requestId],
   );
-  return rows[0] ? map(rows[0]) : undefined;
+  return rows[0] ? (await withEmails(tenantId, rows))[0] : undefined;
 }
 
 export async function listRequests(
@@ -98,7 +115,7 @@ export async function listRequests(
     `${SELECT} WHERE ${where.join(" AND ")} ORDER BY r.request_id DESC LIMIT 200`,
     params,
   );
-  return rows.map(map);
+  return withEmails(tenantId, rows);
 }
 
 /**
