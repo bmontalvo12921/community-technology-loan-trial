@@ -352,6 +352,17 @@ async function ensureAccount(
   if (!email || !password) return;
 
   const normalized = email.trim().toLowerCase();
+  const [existingProfiles] = await db.execute(
+    `SELECT id FROM users
+      WHERE tenant_id = ? AND email = ?
+      LIMIT 1`,
+    [TENANT_ID, normalized],
+  );
+  if ((existingProfiles as { id: number }[]).length > 0) {
+    console.log(`${role} account ${normalized}: already exists`);
+    return;
+  }
+
   const hash = await hashPassword(password);
 
   const result = await createAccount(TENANT_ID, normalized, hash, role);
