@@ -86,7 +86,7 @@ const TABLES: string[] = [
     tenant_id VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role ENUM('ADMIN','STAFF') NOT NULL,
+    role ENUM('ADMIN','STAFF','USER') NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     failed_login_attempts INT UNSIGNED NOT NULL DEFAULT 0,
     locked_at TIMESTAMP NULL DEFAULT NULL,
@@ -108,6 +108,46 @@ const TABLES: string[] = [
     KEY idx_audit_tenant_user (tenant_id, user_id)
   ) ENGINE=InnoDB`,
 ];
+
+// Equipment requests made by regular users and reviewed by staff.
+const REQUESTS_TABLE = `CREATE TABLE IF NOT EXISTS equipment_requests (
+    request_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    device_type ENUM('LAPTOP','TABLET','HOTSPOT') NOT NULL,
+    reason_id INT UNSIGNED NULL,
+    reason_text VARCHAR(1000) NOT NULL,
+    status ENUM('PENDING','APPROVED','DENIED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+    loan_id INT UNSIGNED NULL,
+    reviewed_by BIGINT UNSIGNED NULL,
+    review_note VARCHAR(500) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (request_id),
+    KEY idx_requests_tenant_user (tenant_id, user_id),
+    KEY idx_requests_tenant_status (tenant_id, status)
+  ) ENGINE=InnoDB`;
+
+// Upgrades for databases created before regular user accounts existed.
+async function migrateForUserAccounts(): Promise<void> {
+  await db.query(
+    "ALTER TABLE users MODIFY role ENUM('ADMIN','STAFF','USER') NOT NULL",
+  );
+
+  const [cols] = await db.execute(
+    `SELECT COUNT(*) AS n FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'loans'
+        AND column_name = 'user_id'`,
+  );
+  if (Number((cols as { n: number }[])[0]?.n ?? 0) === 0) {
+    await db.query(
+      "ALTER TABLE loans ADD COLUMN user_id BIGINT UNSIGNED NULL AFTER participant_code, ADD KEY idx_loans_tenant_user (tenant_id, user_id)",
+    );
+    console.log("Added loans.user_id.");
+  }
+
+  await db.query(REQUESTS_TABLE);
+}
 
 const DEFAULT_REASONS = [
   "Job search",
@@ -163,6 +203,7 @@ try {
   for (const statement of TABLES) {
     await db.query(statement);
   }
+  await migrateForUserAccounts();
   console.log("Database tables are in place.");
   await ensureLoanReasons();
 

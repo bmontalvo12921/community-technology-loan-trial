@@ -23,6 +23,16 @@ A successful sign-in returns a bearer token valid for 15 minutes. Use it in `Aut
 
 Fastify/TypeScript API for tenant-scoped outreach centers, devices, loans, loan reasons, and maintenance. JSON fields use camelCase; a MySQL repository maps them to snake_case columns.
 
+## Account levels
+
+| Role | Can do |
+| --- | --- |
+| `USER` | Sign up from the login screen (`POST /v1/auth/register`). See their own equipment (`GET /v1/me/loans`), request equipment with a reason (`POST /v1/me/requests`), view and cancel their own requests. |
+| `STAFF` | Read inventory, centers, maintenance and loan reasons; list user accounts (regular users only); review requests (`/v1/requests`, approve assigns a device and creates the loan, deny); assign equipment (`POST /v1/loans`, optional `userId`) and return loans. |
+| `ADMIN` | Everything, including creating and editing inventory, centers, loan reasons, maintenance and users (any role). |
+
+Permissions are derived from `users.role` at sign-in (`ROLE_PERMISSIONS` in `src/auth-service.ts`). `npm start` runs `setup-database`, which migrates existing databases (adds the `USER` role, `loans.user_id` and the `equipment_requests` table). `POST /v1/dev/token` now also requires `ENABLE_DEV_TOKEN=true`.
+
 ## Run
 
 ```sh
