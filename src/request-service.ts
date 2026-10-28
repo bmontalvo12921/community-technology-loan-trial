@@ -8,38 +8,32 @@ export interface EquipmentRequest {
   requestId: number;
   userId: number;
   userEmail: string | null;
+  centerId: number;
   deviceType: DeviceType;
   reasonId: number | null;
   reasonText: string;
   status: RequestStatus;
-  loanId: number | null;
-  reviewNote: string | null;
   createdAt: string;
-  reviewedAt: string | null;
 }
 
-const iso = (v: unknown) =>
-  v == null ? null : new Date(v as string | Date).toISOString();
+const iso = (v: unknown) => new Date(v as string | Date).toISOString();
 
 function map(row: RowDataPacket): EquipmentRequest {
   return {
     requestId: Number(row.request_id),
     userId: Number(row.user_id),
     userEmail: (row.email as string | null) ?? null,
+    centerId: Number(row.center_id),
     deviceType: row.device_type,
     reasonId: row.reason_id == null ? null : Number(row.reason_id),
-    reasonText: row.reason_text,
+    reasonText: String(row.details ?? ""),
     status: row.status,
-    loanId: row.loan_id == null ? null : Number(row.loan_id),
-    reviewNote: row.review_note ?? null,
     createdAt: iso(row.created_at) as string,
-    reviewedAt: iso(row.reviewed_at),
   };
 }
 
-const SELECT = `SELECT r.request_id, r.user_id, r.device_type,
-       r.reason_id, r.reason_text, r.status, r.loan_id, r.review_note,
-       r.created_at, r.reviewed_at
+const SELECT = `SELECT r.request_id, r.user_id, r.center_id, r.device_type,
+       r.reason_id, r.details, r.status, r.created_at
   FROM equipment_requests r`;
 
 // Emails are looked up separately rather than joined: the users table can
@@ -63,8 +57,16 @@ async function withEmails(
 export async function createRequest(
   tenantId: string,
   userId: number,
-  input: { deviceType: DeviceType; reasonId?: number; reasonText: string },
+  input: { centerId: number; deviceType: DeviceType; reasonId?: number; reasonText: string },
 ): Promise<EquipmentRequest> {
+  const [centers] = await db.execute<RowDataPacket[]>(
+    "SELECT 1 FROM outreach_centers WHERE tenant_id = ? AND center_id = ? AND is_active = 1",
+    [tenantId, input.centerId],
+  );
+  if (!centers.length) {
+    throw Object.assign(new Error("Outreach center not found or inactive"), { statusCode: 404 });
+  }
+
   if (input.reasonId !== undefined) {
     const [r] = await db.execute<RowDataPacket[]>(
       "SELECT 1 FROM loan_reasons WHERE tenant_id = ? AND reason_id = ?",
@@ -77,9 +79,9 @@ export async function createRequest(
 
   const [result] = await db.execute<ResultSetHeader>(
     `INSERT INTO equipment_requests
-       (tenant_id, user_id, device_type, reason_id, reason_text)
-     VALUES (?, ?, ?, ?, ?)`,
-    [tenantId, userId, input.deviceType, input.reasonId ?? null, input.reasonText],
+       (tenant_id, user_id, center_id, device_type, reason_id, details)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [tenantId, userId, input.centerId, input.deviceType, input.reasonId ?? null, input.reasonText],
   );
   const created = await getRequest(tenantId, result.insertId);
   if (!created) throw new Error("Created request could not be retrieved");
@@ -127,19 +129,15 @@ export async function transitionPending(
   tenantId: string,
   requestId: number,
   status: Exclude<RequestStatus, "PENDING">,
-  opts: { ownerId?: number; reviewerId?: number; note?: string; loanId?: number } = {},
+  opts: { ownerId?: number } = {},
 ): Promise<boolean> {
   const [result] = await db.execute<ResultSetHeader>(
     `UPDATE equipment_requests
-        SET status = ?, reviewed_by = ?, review_note = ?, loan_id = ?,
-            reviewed_at = CURRENT_TIMESTAMP
+        SET status = ?
       WHERE tenant_id = ? AND request_id = ? AND status = 'PENDING'
         AND (? IS NULL OR user_id = ?)`,
     [
       status,
-      opts.reviewerId ?? null,
-      opts.note ?? null,
-      opts.loanId ?? null,
       tenantId,
       requestId,
       opts.ownerId ?? null,
@@ -155,19 +153,8 @@ export async function revertToPending(
 ): Promise<void> {
   await db.execute(
     `UPDATE equipment_requests
-        SET status = 'PENDING', reviewed_by = NULL, loan_id = NULL, reviewed_at = NULL
+        SET status = 'PENDING'
       WHERE tenant_id = ? AND request_id = ?`,
     [tenantId, requestId],
-  );
-}
-
-export async function attachLoan(
-  tenantId: string,
-  requestId: number,
-  loanId: number,
-): Promise<void> {
-  await db.execute(
-    "UPDATE equipment_requests SET loan_id = ? WHERE tenant_id = ? AND request_id = ?",
-    [loanId, tenantId, requestId],
   );
 }

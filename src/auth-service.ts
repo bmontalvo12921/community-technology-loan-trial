@@ -13,6 +13,7 @@ export type AuthRole = "ADMIN" | "STAFF" | "USER";
  * the role stored in the users table at sign-in and embedded in the JWT.
  */
 const USER_PERMISSIONS = [
+  "centers:read",
   "loan-reasons:read",
   "my-loans:read",
   "my-requests:read",
@@ -21,6 +22,7 @@ const USER_PERMISSIONS = [
 
 const STAFF_PERMISSIONS = [
   "inventory:read",
+  "inventory:write",
   "centers:read",
   "loans:read",
   "loans:write",
@@ -38,6 +40,7 @@ const ADMIN_PERMISSIONS = [
   "centers:write",
   "loans:read",
   "loans:write",
+  "loans:assign",
   "loan-reasons:read",
   "loan-reasons:write",
   "maintenance:read",

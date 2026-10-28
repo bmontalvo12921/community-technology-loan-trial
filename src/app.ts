@@ -12,7 +12,6 @@ import { z } from "zod";
 import { db } from "./db.js";
 import { hashPassword } from "./password.js";
 import {
-  attachLoan,
   createRequest,
   getRequest,
   listRequests,
@@ -1129,7 +1128,7 @@ app.post(
   app.post(
     "/v1/loans",
     {
-      preHandler: authorize("loans:write")
+      preHandler: authorize("loans:assign")
     },
     async (request, reply) => {
       const body = parse(
@@ -1718,6 +1717,7 @@ app.post(
       const body = parse(
         z
           .object({
+            centerId: positiveId,
             deviceType,
             reasonId: positiveId.optional(),
             reasonText: nonempty(1000)
@@ -1820,6 +1820,13 @@ app.post(
         });
       }
 
+      if (device.centerId !== existing.centerId) {
+        throw Object.assign(
+          new Error("Choose available equipment at the requested outreach center"),
+          { statusCode: 400 }
+        );
+      }
+
       const reasonId = body.reasonId ?? existing.reasonId;
       if (reasonId === null || reasonId === undefined) {
         throw Object.assign(
@@ -1836,9 +1843,7 @@ app.post(
       }
 
       // Claim the request first so two staff members cannot fulfil it twice.
-      const claimed = await transitionPending(tenantId, requestId, "APPROVED", {
-        reviewerId: Number(request.user.sub) || undefined
-      });
+      const claimed = await transitionPending(tenantId, requestId, "APPROVED");
       if (!claimed) {
         throw Object.assign(new Error("Request is no longer pending"), {
           statusCode: 409
@@ -1855,7 +1860,6 @@ app.post(
           checkoutDate,
           dueDate: body.dueDate
         });
-        await attachLoan(tenantId, requestId, loan.loanId);
         return {
           data: { request: await getRequest(tenantId, requestId), loan }
         };
@@ -1875,15 +1879,7 @@ app.post(
         idParams("requestId"),
         request.params
       ) as { requestId: number };
-      const body = parse(
-        z.object({ note: nonempty(500).optional() }).strict(),
-        request.body ?? {}
-      );
-
-      const ok = await transitionPending(tenantId, requestId, "DENIED", {
-        reviewerId: Number(request.user.sub) || undefined,
-        note: body.note
-      });
+      const ok = await transitionPending(tenantId, requestId, "DENIED");
       if (!ok) {
         throw Object.assign(
           new Error("Request not found or no longer pending"),

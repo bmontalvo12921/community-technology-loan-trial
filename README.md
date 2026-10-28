@@ -27,11 +27,11 @@ Fastify/TypeScript API for tenant-scoped outreach centers, devices, loans, loan 
 
 | Role | Can do |
 | --- | --- |
-| `USER` | Sign up from the login screen (`POST /v1/auth/register`). See their own equipment (`GET /v1/me/loans`), request equipment with a reason (`POST /v1/me/requests`), view and cancel their own requests. |
-| `STAFF` | Read inventory, centers, maintenance and loan reasons; list user accounts (regular users only); review requests (`/v1/requests`, approve assigns a device and creates the loan, deny); assign equipment (`POST /v1/loans`, optional `userId`) and return loans. |
-| `ADMIN` | Everything, including creating and editing inventory, centers, loan reasons, maintenance and users (any role). |
+| `USER` | Sign up from the login screen. Browse outreach centers and addresses, see only their own equipment and requests, submit equipment requests with a center, type, category and explanation, and cancel pending requests. |
+| `STAFF` | Read and add inventory, view centers, maintenance and loan reasons, list regular user accounts, review equipment requests and assign available equipment at the requested center, and manage existing loans. The direct new-loan action is reserved for admins. |
+| `ADMIN` | Full staff access plus direct loan assignment, and creating/editing centers, loan reasons, maintenance and user accounts. |
 
-Permissions are derived from `users.role` at sign-in (`ROLE_PERMISSIONS` in `src/auth-service.ts`). `npm start` runs `setup-database`, which migrates existing databases (adds the `USER` role, `loans.user_id` and the `equipment_requests` table). `POST /v1/dev/token` now also requires `ENABLE_DEV_TOKEN=true`.
+Permissions are currently derived from `users.role` at sign-in (`ROLE_PERMISSIONS` in `src/auth-service.ts`). `npm start` runs `setup-database`, which creates missing tables and applies the existing account migrations. `equipment_requests` reads and writes the columns `request_id`, `tenant_id`, `user_id`, `center_id`, `device_type`, `reason_id`, `details`, `status` and `created_at`. `POST /v1/dev/token` requires `ENABLE_DEV_TOKEN=true` outside production.
 
 ## Run
 
