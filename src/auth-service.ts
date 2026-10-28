@@ -6,13 +6,60 @@ import { verifyPassword } from "./password.js";
 const TENANT_ID = "city-of-orlando";
 const MAX_FAILED_ATTEMPTS = 3;
 
-export type AuthRole = "ADMIN" | "STAFF";
+export type AuthRole = "ADMIN" | "STAFF" | "USER";
+
+/**
+ * Permissions granted to each account level. Permissions are looked up from
+ * the role stored in the users table at sign-in and embedded in the JWT.
+ */
+const USER_PERMISSIONS = [
+  "loan-reasons:read",
+  "my-loans:read",
+  "my-requests:read",
+  "my-requests:write",
+];
+
+const STAFF_PERMISSIONS = [
+  "inventory:read",
+  "centers:read",
+  "loans:read",
+  "loans:write",
+  "loan-reasons:read",
+  "maintenance:read",
+  "requests:read",
+  "requests:write",
+  "users:read",
+];
+
+const ADMIN_PERMISSIONS = [
+  "inventory:read",
+  "inventory:write",
+  "centers:read",
+  "centers:write",
+  "loans:read",
+  "loans:write",
+  "loan-reasons:read",
+  "loan-reasons:write",
+  "maintenance:read",
+  "maintenance:write",
+  "requests:read",
+  "requests:write",
+  "users:read",
+  "users:write",
+];
+
+export const ROLE_PERMISSIONS: Record<AuthRole, readonly string[]> = {
+  USER: USER_PERMISSIONS,
+  STAFF: STAFF_PERMISSIONS,
+  ADMIN: ADMIN_PERMISSIONS,
+};
 
 export interface AuthenticatedUser {
   id: string;
   tenantId: string;
   email: string;
   role: AuthRole;
+  permissions: string[];
 }
 
 interface UserRow extends RowDataPacket {
@@ -228,6 +275,7 @@ export async function authenticateUser(
         tenantId: user.tenant_id,
         email: user.email,
         role: user.role,
+        permissions: [...(ROLE_PERMISSIONS[user.role] ?? [])],
       },
     };
   } catch (error) {
@@ -239,4 +287,51 @@ export async function authenticateUser(
   } finally {
     connection.release();
   }
+}
+
+export type RegisterResult =
+  | { success: true; user: AuthenticatedUser }
+  | { success: false; reason: "EMAIL_TAKEN" };
+
+/** Self-service sign-up. Always creates a regular USER account. */
+export async function registerUser(
+  email: string,
+  passwordHash: string,
+  requestId: string | null,
+): Promise<RegisterResult> {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  let insertId: string;
+  try {
+    const [result] = await db.execute<ResultSetHeader>(
+      `INSERT INTO users
+         (tenant_id, email, password_hash, role, is_active)
+       VALUES (?, ?, ?, 'USER', 1)`,
+      [TENANT_ID, normalizedEmail, passwordHash],
+    );
+    insertId = String(result.insertId);
+  } catch (error) {
+    if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
+      return { success: false, reason: "EMAIL_TAKEN" };
+    }
+    throw error;
+  }
+
+  await db.execute(
+    `INSERT INTO security_audit_log
+       (tenant_id, user_id, event_type, event_status, details, request_id)
+     VALUES (?, ?, 'ACCOUNT_REGISTERED', 'SUCCESS', ?, ?)`,
+    [TENANT_ID, insertId, JSON.stringify({ source: "api-register" }), requestId],
+  );
+
+  return {
+    success: true,
+    user: {
+      id: insertId,
+      tenantId: TENANT_ID,
+      email: normalizedEmail,
+      role: "USER",
+      permissions: [...USER_PERMISSIONS],
+    },
+  };
 }

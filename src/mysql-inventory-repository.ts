@@ -127,6 +127,7 @@ function mapLoan(row: DbRow): Loan {
     centerId: numberValue(row.center_id),
     reasonId: numberValue(row.reason_id),
     participantCode: stringValue(row.participant_code),
+    userId: row.user_id == null ? null : numberValue(row.user_id),
     checkoutDate: dateValue(row.checkout_date),
     dueDate: dateValue(row.due_date),
     returnDate: row.return_date == null ? null : dateValue(row.return_date),
@@ -429,7 +430,7 @@ export class MySqlInventoryRepository implements InventoryRepository {
 
   async listLoans(t: string, q: LoanQuery): Promise<Page<Loan>> {
     const [rows] = await db.execute(
-      `SELECT loan_id, device_id, center_id, reason_id, participant_code,
+      `SELECT loan_id, device_id, center_id, reason_id, participant_code, user_id,
               checkout_date, due_date, return_date, loan_status
        FROM loans
        WHERE tenant_id = ?
@@ -450,6 +451,9 @@ export class MySqlInventoryRepository implements InventoryRepository {
     }
     if (q.reasonId !== undefined) {
       items = items.filter((item) => item.reasonId === q.reasonId);
+    }
+    if (q.userId !== undefined) {
+      items = items.filter((item) => item.userId === q.userId);
     }
     if (q.participantCode) {
       items = items.filter(
@@ -474,7 +478,7 @@ export class MySqlInventoryRepository implements InventoryRepository {
 
   async getLoan(t: string, id: number): Promise<Loan | undefined> {
     const [rows] = await db.execute(
-      `SELECT loan_id, device_id, center_id, reason_id, participant_code,
+      `SELECT loan_id, device_id, center_id, reason_id, participant_code, user_id,
               checkout_date, due_date, return_date, loan_status
        FROM loans
        WHERE tenant_id = ? AND loan_id = ?
@@ -538,14 +542,15 @@ export class MySqlInventoryRepository implements InventoryRepository {
       const [result] = await connection.execute(
         `INSERT INTO loans
            (tenant_id, device_id, center_id, reason_id, participant_code,
-            checkout_date, due_date, loan_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+            user_id, checkout_date, due_date, loan_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
         [
           t,
           input.deviceId,
           input.centerId,
           input.reasonId,
           input.participantCode,
+          input.userId ?? null,
           toSqlDateTime(input.checkoutDate),
           toSqlDateTime(input.dueDate),
         ],

@@ -11,9 +11,17 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { db } from "./db.js";
 import { hashPassword } from "./password.js";
+import {
+  attachLoan,
+  createRequest,
+  getRequest,
+  listRequests,
+  revertToPending,
+  transitionPending
+} from "./request-service.js";
 
 import { MySqlInventoryRepository } from "./mysql-inventory-repository.js";
-import { authenticateUser } from "./auth-service.js";
+import { authenticateUser, registerUser, ROLE_PERMISSIONS } from "./auth-service.js";
 import {
   DEVICE_STATUSES,
   DEVICE_TYPES,
@@ -27,16 +35,18 @@ import {
  */
 declare module "@fastify/jwt" {
   interface FastifyJWT {
-   payload: {
-  sub?: string;
-  tenantId: string;
-  permissions: string[];
-};
-user: {
-  sub?: string;
-  tenantId: string;
-  permissions: string[];
-};
+    payload: {
+      sub?: string;
+      tenantId: string;
+      permissions: string[];
+    };
+    user: {
+      sub?: string;
+      tenantId: string;
+      permissions: string[];
+    };
+  }
+}
 
 /**
  * Validation helpers
@@ -76,6 +86,11 @@ const pagination = {
 
 const nonempty = (max: number) =>
   z.string().trim().min(1).max(max);
+const registerBodySchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  password: z.string().min(12).max(256),
+}).strict();
+
 const loginBodySchema = z.object({
   email: z.string().trim().email().max(255),
   password: z.string().min(1).max(256),
@@ -115,7 +130,8 @@ const loanBody = z
     deviceId: positiveId,
     centerId: positiveId,
     reasonId: positiveId,
-    participantCode: nonempty(50),
+    participantCode: nonempty(50).optional(),
+    userId: positiveId.optional(),
     checkoutDate: dateTime,
     dueDate: dateTime
   })
@@ -125,6 +141,13 @@ const loanBody = z
     {
       message: "dueDate must be after checkoutDate",
       path: ["dueDate"]
+    }
+  )
+  .refine(
+    (value) => value.participantCode !== undefined || value.userId !== undefined,
+    {
+      message: "Provide a participantCode or a userId",
+      path: ["participantCode"]
     }
   );
 
@@ -137,30 +160,10 @@ const maintenanceBody = z
   .strict();
 
 /**
- * Development roles
+ * Development token permissions: everything an admin can do.
  */
-const developmentRoles = [
-  "inventory:read",
-  "inventory:write",
-  "loans:read",
-  "loans:write",
-  "centers:read",
-  "centers:write",
-  "maintenance:read",
-  "maintenance:write",
-  "loan-reasons:read",
-  "loan-reasons:write",
-  "users:read",
-  "users:write"
-];
-const staffRoles = [
-  "inventory:read",
-  "loans:read",
-  "loans:write",
-  "centers:read",
-  "maintenance:read",
-  "loan-reasons:read",
-];
+const developmentRoles = [...ROLE_PERMISSIONS.ADMIN];
+
 /**
  * Validation function
  */
@@ -342,6 +345,11 @@ export async function buildApp(
   /**
    * Health check
    */
+  app.get("/health", async () => ({ status: "ok" }));
+
+  /**
+   * Sign in
+   */
 app.post(
   "/v1/auth/login",
   {
@@ -394,6 +402,52 @@ app.post(
 );
 
   /**
+   * Sign up: anyone can create a regular USER account. Staff and admin
+   * accounts can only be created by an admin through POST /v1/users.
+   */
+  app.post(
+    "/v1/auth/register",
+    {
+      config: {
+        rateLimit: { max: 5, timeWindow: "1 minute" },
+      },
+    },
+    async (request, reply) => {
+      const body = parse(registerBodySchema, request.body);
+      const passwordHash = await hashPassword(body.password);
+      const result = await registerUser(body.email, passwordHash, request.id);
+
+      if (!result.success) {
+        throw Object.assign(
+          new Error("An account with that email already exists"),
+          { statusCode: 409 },
+        );
+      }
+
+      const token = await reply.jwtSign(
+        {
+          sub: result.user.id,
+          tenantId: result.user.tenantId,
+          permissions: result.user.permissions,
+        },
+        { expiresIn: "15m" },
+      );
+
+      return reply.code(201).send({
+        token,
+        tokenType: "Bearer",
+        expiresIn: "15m",
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          role: result.user.role,
+          permissions: result.user.permissions,
+        },
+      });
+    },
+  );
+
+  /**
    * JWT authentication hook
    *
    * Development token endpoint remains public.
@@ -406,7 +460,8 @@ app.post(
       if (
         !pathname.startsWith("/v1/") ||
         pathname === "/v1/dev/token" ||
-        pathname === "/v1/auth/login"
+        pathname === "/v1/auth/login" ||
+        pathname === "/v1/auth/register"
       ) {
         return;
       }
@@ -425,7 +480,7 @@ app.post(
     .object({
       email: z.string().trim().toLowerCase().email().max(255),
       password: z.string().min(12).max(256),
-      role: z.enum(["ADMIN", "STAFF"])
+      role: z.enum(["ADMIN", "STAFF", "USER"])
     })
     .strict();
 
@@ -433,10 +488,13 @@ app.post(
     "/v1/users",
     { preHandler: authorize("users:read") },
     async (request) => {
+      // Staff can look up regular users to assign equipment; only admins
+      // (users:write) see staff and admin accounts.
+      const isAdmin = request.user.permissions.includes("users:write");
       const [rows] = await db.execute(
         `SELECT id, email, role, is_active
            FROM users
-          WHERE tenant_id = ?
+          WHERE tenant_id = ?${isAdmin ? "" : " AND role = 'USER'"}
           ORDER BY id`,
         [request.user.tenantId]
       );
@@ -1029,6 +1087,7 @@ app.post(
       participantCode:
         nonempty(50).optional(),
       reasonId: positiveId.optional(),
+      userId: positiveId.optional(),
       checkoutFrom:
         dateTime.optional(),
       checkoutTo:
@@ -1076,10 +1135,29 @@ app.post(
         request.body
       );
 
+      let participantCode = body.participantCode;
+      if (body.userId !== undefined) {
+        const [users] = await db.execute(
+          `SELECT email FROM users
+            WHERE id = ? AND tenant_id = ? AND role = 'USER' AND is_active = 1`,
+          [body.userId, request.user.tenantId]
+        );
+        const target = (users as { email: string }[])[0];
+        if (!target) {
+          throw Object.assign(new Error("User not found"), {
+            statusCode: 404
+          });
+        }
+        participantCode ??= target.email.slice(0, 50);
+      }
+
       const data =
         await repository.createLoan(
           request.user.tenantId,
-          body
+          {
+            ...body,
+            participantCode: participantCode as string
+          }
         );
 
       return reply
@@ -1589,13 +1667,243 @@ app.post(
 
   /**
    * ============================
+   * MY EQUIPMENT AND REQUESTS (regular users)
+   * ============================
+   */
+
+  const currentUserId = (request: FastifyRequest) => {
+    const id = Number(request.user.sub);
+    if (!Number.isInteger(id) || id < 1) {
+      throw Object.assign(new Error("Invalid session"), { statusCode: 401 });
+    }
+    return id;
+  };
+
+  app.get(
+    "/v1/me/loans",
+    { preHandler: authorize("my-loans:read") },
+    async (request) => {
+      const userId = currentUserId(request);
+      const result = await repository.listLoans(request.user.tenantId, {
+        userId,
+        limit: 100
+      });
+      const devices = await Promise.all(
+        result.items.map((loan) =>
+          repository.getDevice(request.user.tenantId, loan.deviceId)
+        )
+      );
+      return {
+        data: result.items.map((loan, i) => ({ ...loan, device: devices[i] }))
+      };
+    }
+  );
+
+  app.get(
+    "/v1/me/requests",
+    { preHandler: authorize("my-requests:read") },
+    async (request) => ({
+      data: await listRequests(request.user.tenantId, {
+        userId: currentUserId(request)
+      })
+    })
+  );
+
+  app.post(
+    "/v1/me/requests",
+    { preHandler: authorize("my-requests:write") },
+    async (request, reply) => {
+      const body = parse(
+        z
+          .object({
+            deviceType,
+            reasonId: positiveId.optional(),
+            reasonText: nonempty(1000)
+          })
+          .strict(),
+        request.body
+      );
+
+      const data = await createRequest(
+        request.user.tenantId,
+        currentUserId(request),
+        body
+      );
+      return reply.code(201).send({ data });
+    }
+  );
+
+  app.post(
+    "/v1/me/requests/:requestId/cancel",
+    { preHandler: authorize("my-requests:write") },
+    async (request) => {
+      const { requestId } = parse(
+        idParams("requestId"),
+        request.params
+      ) as { requestId: number };
+
+      const ok = await transitionPending(
+        request.user.tenantId,
+        requestId,
+        "CANCELLED",
+        { ownerId: currentUserId(request) }
+      );
+      if (!ok) {
+        throw Object.assign(
+          new Error("Request not found or no longer pending"),
+          { statusCode: 409 }
+        );
+      }
+      return { data: await getRequest(request.user.tenantId, requestId) };
+    }
+  );
+
+  /**
+   * ============================
+   * EQUIPMENT REQUESTS (staff and admin)
+   * ============================
+   */
+
+  app.get(
+    "/v1/requests",
+    { preHandler: authorize("requests:read") },
+    async (request) => {
+      const query = parse(
+        z
+          .object({
+            status: z
+              .enum(["PENDING", "APPROVED", "DENIED", "CANCELLED"])
+              .optional(),
+            userId: positiveId.optional()
+          })
+          .strict(),
+        request.query
+      );
+      return { data: await listRequests(request.user.tenantId, query) };
+    }
+  );
+
+  app.post(
+    "/v1/requests/:requestId/approve",
+    { preHandler: authorize("requests:write") },
+    async (request) => {
+      const tenantId = request.user.tenantId;
+      const { requestId } = parse(
+        idParams("requestId"),
+        request.params
+      ) as { requestId: number };
+
+      const body = parse(
+        z
+          .object({
+            deviceId: positiveId,
+            reasonId: positiveId.optional(),
+            dueDate: dateTime
+          })
+          .strict(),
+        request.body
+      );
+
+      const existing = await getRequest(tenantId, requestId);
+      if (!existing) {
+        throw Object.assign(new Error("Request not found"), {
+          statusCode: 404
+        });
+      }
+
+      const device = await repository.getDevice(tenantId, body.deviceId);
+      if (!device) {
+        throw Object.assign(new Error("Device not found"), {
+          statusCode: 404
+        });
+      }
+
+      const reasonId = body.reasonId ?? existing.reasonId;
+      if (reasonId === null || reasonId === undefined) {
+        throw Object.assign(
+          new Error("Choose a loan reason; the request did not include one"),
+          { statusCode: 400 }
+        );
+      }
+
+      const checkoutDate = new Date().toISOString();
+      if (body.dueDate <= checkoutDate) {
+        throw Object.assign(new Error("dueDate must be in the future"), {
+          statusCode: 400
+        });
+      }
+
+      // Claim the request first so two staff members cannot fulfil it twice.
+      const claimed = await transitionPending(tenantId, requestId, "APPROVED", {
+        reviewerId: Number(request.user.sub) || undefined
+      });
+      if (!claimed) {
+        throw Object.assign(new Error("Request is no longer pending"), {
+          statusCode: 409
+        });
+      }
+
+      try {
+        const loan = await repository.createLoan(tenantId, {
+          deviceId: device.deviceId,
+          centerId: device.centerId,
+          reasonId,
+          participantCode: (existing.userEmail ?? `user-${existing.userId}`).slice(0, 50),
+          userId: existing.userId,
+          checkoutDate,
+          dueDate: body.dueDate
+        });
+        await attachLoan(tenantId, requestId, loan.loanId);
+        return {
+          data: { request: await getRequest(tenantId, requestId), loan }
+        };
+      } catch (error) {
+        await revertToPending(tenantId, requestId);
+        throw error;
+      }
+    }
+  );
+
+  app.post(
+    "/v1/requests/:requestId/deny",
+    { preHandler: authorize("requests:write") },
+    async (request) => {
+      const tenantId = request.user.tenantId;
+      const { requestId } = parse(
+        idParams("requestId"),
+        request.params
+      ) as { requestId: number };
+      const body = parse(
+        z.object({ note: nonempty(500).optional() }).strict(),
+        request.body ?? {}
+      );
+
+      const ok = await transitionPending(tenantId, requestId, "DENIED", {
+        reviewerId: Number(request.user.sub) || undefined,
+        note: body.note
+      });
+      if (!ok) {
+        throw Object.assign(
+          new Error("Request not found or no longer pending"),
+          { statusCode: 409 }
+        );
+      }
+      return { data: await getRequest(tenantId, requestId) };
+    }
+  );
+
+  /**
+   * ============================
    * DEVELOPMENT TOKEN
    * ============================
    *
    * This endpoint is intentionally
    * available only outside production.
    */
-  if (process.env.NODE_ENV !== "production") {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.ENABLE_DEV_TOKEN === "true"
+  ) {
     app.post(
       "/v1/dev/token",
       async (request, reply) => {
@@ -1614,7 +1922,7 @@ app.post(
             {
               tenantId:
                 body.tenantId,
-              roles:
+              permissions:
                 developmentRoles
             },
             {

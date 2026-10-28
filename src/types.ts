@@ -60,6 +60,8 @@ export interface Loan {
   centerId: number;
   reasonId: number;
   participantCode: string;
+  /** The user account the device was assigned to, when there is one. */
+  userId?: number | null;
   checkoutDate: string;
   dueDate: string;
   returnDate: string | null;
@@ -112,6 +114,7 @@ export interface LoanQuery extends PageQuery {
   centerId?: number;
   deviceId?: number;
   participantCode?: string;
+  userId?: number;
   reasonId?: number;
   checkoutFrom?: string;
   checkoutTo?: string;
@@ -141,7 +144,9 @@ export type CreateCenter = Pick<OutreachCenter, "centerName" | "address" | "phon
 export type UpdateCenter = Partial<CreateCenter>;
 
 /** Lifecycle fields are assigned by the checkout operation. */
-export type CreateLoan = Pick<Loan, "deviceId" | "centerId" | "reasonId" | "participantCode" | "checkoutDate" | "dueDate">;
+export type CreateLoan = Pick<Loan, "deviceId" | "centerId" | "reasonId" | "participantCode" | "checkoutDate" | "dueDate"> & {
+  userId?: number;
+};
 
 /** Loan lifecycle fields cannot be changed through the generic PATCH route. */
 export type UpdateLoan = Pick<Partial<Loan>, "dueDate" | "reasonId">;
