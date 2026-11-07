@@ -111,6 +111,7 @@ const TABLES: string[] = [
     tenant_id VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    approval_status ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'APPROVED',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     failed_login_attempts INT UNSIGNED NOT NULL DEFAULT 0,
     locked_at TIMESTAMP NULL DEFAULT NULL,
@@ -157,6 +158,19 @@ async function migrateForUserAccounts(): Promise<void> {
   await db.query(
     "ALTER TABLE users MODIFY role ENUM('ADMIN','STAFF','USER') NOT NULL",
   );
+
+  // Existing accounts are approved by default; new self-signups are created as pending.
+  const [approvalStatusColumn] = await db.execute(
+    `SELECT COUNT(*) AS n FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'user_auth'
+        AND column_name = 'approval_status'`,
+  );
+  if (Number((approvalStatusColumn as { n: number }[])[0]?.n ?? 0) === 0) {
+    await db.query(
+      "ALTER TABLE user_auth ADD COLUMN approval_status ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'APPROVED' AFTER password_hash",
+    );
+    console.log("Added user_auth.approval_status.");
+  }
 
   const [templateColumn] = await db.execute(
     `SELECT COUNT(*) AS n FROM information_schema.columns
