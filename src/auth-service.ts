@@ -75,6 +75,7 @@ interface AuthRow extends RowDataPacket {
   email: string;
   password_hash: string;
   is_active: number | boolean;
+  approval_status: string;
   failed_login_attempts: number;
   locked_at: Date | string | null;
 }
@@ -126,6 +127,7 @@ export async function createAccount(
   email: string,
   passwordHash: string,
   role: AuthRole,
+  isActive = true,
 ): Promise<CreateAccountResult> {
   const normalizedEmail = email.trim().toLowerCase();
   const connection = await db.getConnection();
@@ -156,7 +158,7 @@ export async function createAccount(
     // Older installs keep these columns on users. Leave harmless placeholders there;
     // password hashes and login state are stored and read only from user_auth.
     addLegacyField("password_hash", "?", "");
-    addLegacyField("is_active", "?", 1);
+    addLegacyField("is_active", "?", isActive ? 1 : 0);
     addLegacyField("failed_login_attempts", "?", 0);
     addLegacyField("locked_at", "?", null);
     addLegacyField("last_login_at", "?", null);
@@ -170,10 +172,17 @@ export async function createAccount(
 
     await connection.execute(
       `INSERT INTO user_auth
-         (user_id, tenant_id, email, password_hash, is_active,
+         (user_id, tenant_id, email, password_hash, approval_status, is_active,
           failed_login_attempts, locked_at, last_login_at, created_at)
-       VALUES (?, ?, ?, ?, 1, 0, NULL, NULL, CURRENT_TIMESTAMP)`,
-      [userId, tenantId, normalizedEmail, passwordHash],
+       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, CURRENT_TIMESTAMP)`,
+      [
+        userId,
+        tenantId,
+        normalizedEmail,
+        passwordHash,
+        isActive ? "APPROVED" : "PENDING",
+        isActive ? 1 : 0,
+      ],
     );
 
     const permissions = await permissionsForTemplate(connection, tenantId, templateId);
@@ -198,7 +207,8 @@ export async function createAccount(
 export type LoginFailureReason =
   | "INVALID_CREDENTIALS"
   | "ACCOUNT_LOCKED"
-  | "ACCOUNT_INACTIVE";
+  | "ACCOUNT_INACTIVE"
+  | "ACCOUNT_PENDING_APPROVAL";
 
 export type LoginResult =
   | { success: true; user: AuthenticatedUser }
@@ -240,7 +250,7 @@ export async function authenticateUser(
 
     const normalizedEmail = email.trim().toLowerCase();
     const [authRows] = await connection.execute<AuthRow[]>(
-      `SELECT user_id, tenant_id, email, password_hash, is_active,
+      `SELECT user_id, tenant_id, email, password_hash, approval_status, is_active,
               failed_login_attempts, locked_at
          FROM user_auth
         WHERE tenant_id = ? AND email = ?
@@ -278,6 +288,13 @@ export async function authenticateUser(
       await connection.commit();
       transactionStarted = false;
       return { success: false, reason: "ACCOUNT_LOCKED" };
+    }
+
+    if (auth.approval_status === "PENDING") {
+      await writeAuthAudit(connection, userId, "LOGIN_FAILURE", "PENDING_APPROVAL", requestId);
+      await connection.commit();
+      transactionStarted = false;
+      return { success: false, reason: "ACCOUNT_PENDING_APPROVAL" };
     }
 
     if (!auth.is_active) {
@@ -352,20 +369,25 @@ export type RegisterResult =
   | { success: true; user: AuthenticatedUser }
   | { success: false; reason: "EMAIL_TAKEN" };
 
-/** Self-service sign-up always creates a regular USER account. */
+/** Self-service sign-up always creates a pending USER account for Admin approval. */
 export async function registerUser(
   email: string,
   passwordHash: string,
   requestId: string | null,
 ): Promise<RegisterResult> {
-  const result = await createAccount(TENANT_ID, email, passwordHash, "USER");
+  const result = await createAccount(TENANT_ID, email, passwordHash, "USER", false);
   if (!result.success) return result;
 
   await db.execute(
     `INSERT INTO security_audit_log
        (tenant_id, user_id, event_type, event_status, details, request_id)
-     VALUES (?, ?, 'ACCOUNT_REGISTERED', 'SUCCESS', ?, ?)`,
-    [TENANT_ID, result.user.id, JSON.stringify({ source: "api-register" }), requestId],
+     VALUES (?, ?, 'ACCOUNT_REGISTERED', 'PENDING_APPROVAL', ?, ?)`,
+    [
+      TENANT_ID,
+      result.user.id,
+      JSON.stringify({ source: "api-register", approvalStatus: "PENDING" }),
+      requestId,
+    ],
   );
   return result;
 }
