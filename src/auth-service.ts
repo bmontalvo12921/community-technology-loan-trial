@@ -1,19 +1,22 @@
-import type { ResultSetHeader, RowDataPacket } from "mysql2";
-import { db } from "./db.js";
+
 import { verifyPassword } from "./password.js";
+import {
+  memoryStore,
+  type AuthRole,
+  type MemoryUser
+} from "./memory-store.js";
 
-const TENANT_ID = "city-of-orlando";
-const MAX_FAILED_ATTEMPTS = 3;
+export const TENANT_ID = "city-of-orlando";
+export const MAX_FAILED_ATTEMPTS = 3;
 
-export type AuthRole = "ADMIN" | "STAFF" | "USER";
+export type { AuthRole };
 
-/** Default permissions used to populate the access templates on first setup. */
 const USER_PERMISSIONS = [
   "centers:read",
   "loan-reasons:read",
   "my-loans:read",
   "my-requests:read",
-  "my-requests:write",
+  "my-requests:write"
 ];
 
 const STAFF_PERMISSIONS = [
@@ -26,7 +29,7 @@ const STAFF_PERMISSIONS = [
   "maintenance:read",
   "requests:read",
   "requests:write",
-  "users:read",
+  "users:read"
 ];
 
 const ADMIN_PERMISSIONS = [
@@ -44,13 +47,16 @@ const ADMIN_PERMISSIONS = [
   "requests:read",
   "requests:write",
   "users:read",
-  "users:write",
+  "users:write"
 ];
 
-export const ROLE_PERMISSIONS: Record<AuthRole, readonly string[]> = {
+export const ROLE_PERMISSIONS: Record<
+  AuthRole,
+  readonly string[]
+> = {
   USER: USER_PERMISSIONS,
   STAFF: STAFF_PERMISSIONS,
-  ADMIN: ADMIN_PERMISSIONS,
+  ADMIN: ADMIN_PERMISSIONS
 };
 
 export interface AuthenticatedUser {
@@ -61,148 +67,9 @@ export interface AuthenticatedUser {
   permissions: string[];
 }
 
-interface ProfileRow extends RowDataPacket {
-  id: string | number;
-  tenant_id: string;
-  email: string;
-  role: AuthRole;
-  access_template_id: number | null;
-}
-
-interface AuthRow extends RowDataPacket {
-  user_id: string | number;
-  tenant_id: string;
-  email: string;
-  password_hash: string;
-  is_active: number | boolean;
-  approval_status: string;
-  failed_login_attempts: number;
-  locked_at: Date | string | null;
-}
-
-export { TENANT_ID, MAX_FAILED_ATTEMPTS };
-
-async function permissionsForTemplate(
-  connection: import("mysql2/promise").PoolConnection,
-  tenantId: string,
-  templateId: number,
-): Promise<string[]> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT permission_key
-       FROM access_template_permissions
-      WHERE tenant_id = ? AND template_id = ?
-      ORDER BY permission_key`,
-    [tenantId, templateId],
-  );
-  return rows.map((row) => String(row.permission_key));
-}
-
-async function templateForRole(
-  connection: import("mysql2/promise").PoolConnection,
-  tenantId: string,
-  role: AuthRole,
-): Promise<number> {
-  const [rows] = await connection.execute<RowDataPacket[]>(
-    `SELECT template_id
-       FROM access_templates
-      WHERE tenant_id = ? AND UPPER(template_name) = ?
-      ORDER BY template_id
-      LIMIT 1`,
-    [tenantId, role],
-  );
-  const templateId = rows[0]?.template_id;
-  if (templateId == null) {
-    throw new Error(`The ${role} access template is not configured for ${tenantId}`);
-  }
-  return Number(templateId);
-}
-
 export type CreateAccountResult =
   | { success: true; user: AuthenticatedUser }
   | { success: false; reason: "EMAIL_TAKEN" };
-
-/** Creates the profile and its separate authentication row in one transaction. */
-export async function createAccount(
-  tenantId: string,
-  email: string,
-  passwordHash: string,
-  role: AuthRole,
-  isActive = true,
-): Promise<CreateAccountResult> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const connection = await db.getConnection();
-  let transactionStarted = false;
-
-  try {
-    await connection.beginTransaction();
-    transactionStarted = true;
-
-    const templateId = await templateForRole(connection, tenantId, role);
-    const [legacyColumns] = await connection.execute<RowDataPacket[]>(
-      `SELECT column_name
-         FROM information_schema.columns
-        WHERE table_schema = DATABASE() AND table_name = 'users'
-          AND column_name IN
-            ('password_hash', 'is_active', 'failed_login_attempts', 'locked_at', 'last_login_at', 'created_at')`,
-    );
-    const available = new Set(legacyColumns.map((row) => String(row.column_name)));
-    const profileColumns = ["tenant_id", "email", "role", "access_template_id"];
-    const profileExpressions = ["?", "?", "?", "?"];
-    const profileValues: (string | number | null)[] = [tenantId, normalizedEmail, role, templateId];
-    const addLegacyField = (name: string, expression: string, value?: string | number | null) => {
-      if (!available.has(name)) return;
-      profileColumns.push(name);
-      profileExpressions.push(expression);
-      if (expression === "?") profileValues.push(value ?? null);
-    };
-    // Older installs keep these columns on users. Leave harmless placeholders there;
-    // password hashes and login state are stored and read only from user_auth.
-    addLegacyField("password_hash", "?", "");
-    addLegacyField("is_active", "?", isActive ? 1 : 0);
-    addLegacyField("failed_login_attempts", "?", 0);
-    addLegacyField("locked_at", "?", null);
-    addLegacyField("last_login_at", "?", null);
-    addLegacyField("created_at", "CURRENT_TIMESTAMP");
-    const [insert] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO users (${profileColumns.join(", ")})
-       VALUES (${profileExpressions.join(", ")})`,
-      profileValues,
-    );
-    const userId = String(insert.insertId);
-
-    await connection.execute(
-      `INSERT INTO user_auth
-         (user_id, tenant_id, email, password_hash, approval_status, is_active,
-          failed_login_attempts, locked_at, last_login_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, CURRENT_TIMESTAMP)`,
-      [
-        userId,
-        tenantId,
-        normalizedEmail,
-        passwordHash,
-        isActive ? "APPROVED" : "PENDING",
-        isActive ? 1 : 0,
-      ],
-    );
-
-    const permissions = await permissionsForTemplate(connection, tenantId, templateId);
-    await connection.commit();
-    transactionStarted = false;
-
-    return {
-      success: true,
-      user: { id: userId, tenantId, email: normalizedEmail, role, permissions },
-    };
-  } catch (error) {
-    if (transactionStarted) await connection.rollback();
-    if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
-      return { success: false, reason: "EMAIL_TAKEN" };
-    }
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
 
 export type LoginFailureReason =
   | "INVALID_CREDENTIALS"
@@ -214,180 +81,294 @@ export type LoginResult =
   | { success: true; user: AuthenticatedUser }
   | { success: false; reason: LoginFailureReason };
 
-async function writeAuthAudit(
-  connection: import("mysql2/promise").PoolConnection,
+export type RegisterResult = CreateAccountResult;
+
+function toAuthenticatedUser(
+  user: MemoryUser
+): AuthenticatedUser {
+  return {
+    id: user.id,
+    tenantId: user.tenantId,
+    email: user.email,
+    role: user.role,
+    permissions: [...ROLE_PERMISSIONS[user.role]]
+  };
+}
+
+function audit(
+  tenantId: string,
   userId: string | null,
   eventType: string,
   eventStatus: string,
-  requestId: string | null,
-): Promise<void> {
-  await connection.execute(
-    `INSERT INTO security_audit_log
-       (tenant_id, user_id, event_type, event_status, details, request_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      TENANT_ID,
-      userId,
-      eventType,
-      eventStatus,
-      JSON.stringify({ source: "api-login" }),
-      requestId,
-    ],
-  );
+  requestId: string | null
+): void {
+  memoryStore.recordAudit({
+    tenantId,
+    userId,
+    eventType,
+    eventStatus,
+    requestId,
+    timestamp: new Date().toISOString()
+  });
 }
 
+/**
+ * Create an account using the in-memory user store.
+ *
+ * Password hashing is performed by the caller.
+ */
+export async function createAccount(
+  tenantId: string,
+  email: string,
+  passwordHash: string,
+  role: AuthRole,
+  isActive = true
+): Promise<CreateAccountResult> {
+  const user = memoryStore.createUser(
+    tenantId,
+    email,
+    passwordHash,
+    role,
+    isActive
+  );
+
+  if (!user) {
+    return {
+      success: false,
+      reason: "EMAIL_TAKEN"
+    };
+  }
+
+  audit(
+    tenantId,
+    user.id,
+    "ACCOUNT_CREATED",
+    isActive ? "ACTIVE" : "INACTIVE",
+    null
+  );
+
+  return {
+    success: true,
+    user: toAuthenticatedUser(user)
+  };
+}
+
+/**
+ * Authenticate a user.
+ *
+ * Accounts lock after three consecutive failed password attempts.
+ */
 export async function authenticateUser(
   email: string,
   password: string,
-  requestId: string | null,
+  requestId: string | null
 ): Promise<LoginResult> {
-  const connection = await db.getConnection();
-  let transactionStarted = false;
+  const user = memoryStore.findUserByEmail(
+    TENANT_ID,
+    email
+  );
 
-  try {
-    await connection.beginTransaction();
-    transactionStarted = true;
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const [authRows] = await connection.execute<AuthRow[]>(
-      `SELECT user_id, tenant_id, email, password_hash, approval_status, is_active,
-              failed_login_attempts, locked_at
-         FROM user_auth
-        WHERE tenant_id = ? AND email = ?
-        LIMIT 1 FOR UPDATE`,
-      [TENANT_ID, normalizedEmail],
+  if (!user) {
+    audit(
+      TENANT_ID,
+      null,
+      "LOGIN_FAILURE",
+      "INVALID_CREDENTIALS",
+      requestId
     );
-    const auth = authRows[0];
-
-    if (!auth) {
-      await writeAuthAudit(connection, null, "LOGIN_FAILURE", "INVALID_CREDENTIALS", requestId);
-      await connection.commit();
-      transactionStarted = false;
-      return { success: false, reason: "INVALID_CREDENTIALS" };
-    }
-
-    const userId = String(auth.user_id);
-    const [profileRows] = await connection.execute<ProfileRow[]>(
-      `SELECT id, tenant_id, email, role, access_template_id
-         FROM users
-        WHERE tenant_id = ? AND id = ?
-        LIMIT 1 FOR UPDATE`,
-      [TENANT_ID, userId],
-    );
-    const profile = profileRows[0];
-
-    if (!profile) {
-      await writeAuthAudit(connection, userId, "LOGIN_FAILURE", "INVALID_CREDENTIALS", requestId);
-      await connection.commit();
-      transactionStarted = false;
-      return { success: false, reason: "INVALID_CREDENTIALS" };
-    }
-
-    if (auth.locked_at !== null) {
-      await writeAuthAudit(connection, userId, "LOGIN_FAILURE", "ACCOUNT_LOCKED", requestId);
-      await connection.commit();
-      transactionStarted = false;
-      return { success: false, reason: "ACCOUNT_LOCKED" };
-    }
-
-    if (auth.approval_status === "PENDING") {
-      await writeAuthAudit(connection, userId, "LOGIN_FAILURE", "PENDING_APPROVAL", requestId);
-      await connection.commit();
-      transactionStarted = false;
-      return { success: false, reason: "ACCOUNT_PENDING_APPROVAL" };
-    }
-
-    if (!auth.is_active) {
-      await writeAuthAudit(connection, userId, "LOGIN_FAILURE", "ACCOUNT_INACTIVE", requestId);
-      await connection.commit();
-      transactionStarted = false;
-      return { success: false, reason: "ACCOUNT_INACTIVE" };
-    }
-
-    const passwordMatches = await verifyPassword(password, auth.password_hash);
-    if (!passwordMatches) {
-      const nextAttempts = Number(auth.failed_login_attempts) + 1;
-      const shouldLock = nextAttempts >= MAX_FAILED_ATTEMPTS;
-      await connection.execute(
-        `UPDATE user_auth
-            SET failed_login_attempts = ?,
-                locked_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE locked_at END
-          WHERE tenant_id = ? AND user_id = ?`,
-        [nextAttempts, shouldLock, TENANT_ID, userId],
-      );
-      await writeAuthAudit(
-        connection,
-        userId,
-        shouldLock ? "ACCOUNT_LOCKED" : "LOGIN_FAILURE",
-        shouldLock ? "ACCOUNT_LOCKED" : "INVALID_CREDENTIALS",
-        requestId,
-      );
-      await connection.commit();
-      transactionStarted = false;
-      return { success: false, reason: shouldLock ? "ACCOUNT_LOCKED" : "INVALID_CREDENTIALS" };
-    }
-
-    let templateId = profile.access_template_id;
-    if (templateId == null) {
-      templateId = await templateForRole(connection, TENANT_ID, profile.role);
-      await connection.execute(
-        "UPDATE users SET access_template_id = ? WHERE tenant_id = ? AND id = ?",
-        [templateId, TENANT_ID, userId],
-      );
-    }
-    const permissions = await permissionsForTemplate(connection, TENANT_ID, Number(templateId));
-
-    await connection.execute(
-      `UPDATE user_auth
-          SET failed_login_attempts = 0, last_login_at = CURRENT_TIMESTAMP
-        WHERE tenant_id = ? AND user_id = ?`,
-      [TENANT_ID, userId],
-    );
-    await writeAuthAudit(connection, userId, "LOGIN_SUCCESS", "SUCCESS", requestId);
-    await connection.commit();
-    transactionStarted = false;
 
     return {
-      success: true,
-      user: {
-        id: userId,
-        tenantId: profile.tenant_id,
-        email: auth.email,
-        role: profile.role,
-        permissions,
-      },
+      success: false,
+      reason: "INVALID_CREDENTIALS"
     };
-  } catch (error) {
-    if (transactionStarted) await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
   }
+
+  if (user.locked) {
+    audit(
+      TENANT_ID,
+      user.id,
+      "LOGIN_FAILURE",
+      "ACCOUNT_LOCKED",
+      requestId
+    );
+
+    return {
+      success: false,
+      reason: "ACCOUNT_LOCKED"
+    };
+  }
+
+  if (user.approvalStatus === "PENDING") {
+    audit(
+      TENANT_ID,
+      user.id,
+      "LOGIN_FAILURE",
+      "PENDING_APPROVAL",
+      requestId
+    );
+
+    return {
+      success: false,
+      reason: "ACCOUNT_PENDING_APPROVAL"
+    };
+  }
+
+  if (!user.isActive) {
+    audit(
+      TENANT_ID,
+      user.id,
+      "LOGIN_FAILURE",
+      "ACCOUNT_INACTIVE",
+      requestId
+    );
+
+    return {
+      success: false,
+      reason: "ACCOUNT_INACTIVE"
+    };
+  }
+
+  const passwordMatches = await verifyPassword(
+    password,
+    user.passwordHash
+  );
+
+  if (!passwordMatches) {
+    user.failedAttempts++;
+
+    const shouldLock =
+      user.failedAttempts >= MAX_FAILED_ATTEMPTS;
+
+    if (shouldLock) {
+      user.locked = true;
+    }
+
+    audit(
+      TENANT_ID,
+      user.id,
+      shouldLock ? "ACCOUNT_LOCKED" : "LOGIN_FAILURE",
+      shouldLock ? "ACCOUNT_LOCKED" : "INVALID_CREDENTIALS",
+      requestId
+    );
+
+    return {
+      success: false,
+      reason: shouldLock
+        ? "ACCOUNT_LOCKED"
+        : "INVALID_CREDENTIALS"
+    };
+  }
+
+  user.failedAttempts = 0;
+
+  audit(
+    TENANT_ID,
+    user.id,
+    "LOGIN_SUCCESS",
+    "SUCCESS",
+    requestId
+  );
+
+  return {
+    success: true,
+    user: toAuthenticatedUser(user)
+  };
 }
 
-export type RegisterResult =
-  | { success: true; user: AuthenticatedUser }
-  | { success: false; reason: "EMAIL_TAKEN" };
-
-/** Self-service sign-up always creates a pending USER account for Admin approval. */
+/**
+ * Self-service registration creates a pending USER account.
+ * An administrator must activate the account before login.
+ */
 export async function registerUser(
   email: string,
   passwordHash: string,
-  requestId: string | null,
+  requestId: string | null
 ): Promise<RegisterResult> {
-  const result = await createAccount(TENANT_ID, email, passwordHash, "USER", false);
-  if (!result.success) return result;
-
-  await db.execute(
-    `INSERT INTO security_audit_log
-       (tenant_id, user_id, event_type, event_status, details, request_id)
-     VALUES (?, ?, 'ACCOUNT_REGISTERED', 'PENDING_APPROVAL', ?, ?)`,
-    [
-      TENANT_ID,
-      result.user.id,
-      JSON.stringify({ source: "api-register", approvalStatus: "PENDING" }),
-      requestId,
-    ],
+  const result = await createAccount(
+    TENANT_ID,
+    email,
+    passwordHash,
+    "USER",
+    false
   );
+
+  if (!result.success) {
+    return result;
+  }
+
+  audit(
+    TENANT_ID,
+    result.user.id,
+    "ACCOUNT_REGISTERED",
+    "PENDING_APPROVAL",
+    requestId
+  );
+
   return result;
+}
+
+/**
+ * List users within a tenant.
+ */
+export function listUsers(
+  tenantId: string,
+  includeStaffAndAdmins: boolean
+) {
+  return memoryStore.listUsers(
+    tenantId,
+    includeStaffAndAdmins
+  );
+}
+
+/**
+ * Activate or deactivate an account.
+ */
+export function setUserActive(
+  tenantId: string,
+  userId: string | number,
+  isActive: boolean
+): boolean {
+  const success = memoryStore.setUserActive(
+    tenantId,
+    userId,
+    isActive
+  );
+
+  if (success) {
+    audit(
+      tenantId,
+      String(userId),
+      isActive ? "ACCOUNT_ACTIVATED" : "ACCOUNT_DEACTIVATED",
+      isActive ? "ACTIVE" : "INACTIVE",
+      null
+    );
+  }
+
+  return success;
+}
+
+/**
+ * Verify that a user is an active regular user.
+ * Used when assigning equipment to a user account.
+ */
+export function findActiveRegularUser(
+  tenantId: string,
+  userId: string | number
+): MemoryUser | undefined {
+  const user = memoryStore.findUserById(
+    tenantId,
+    userId
+  );
+
+  if (
+    !user ||
+    user.role !== "USER" ||
+    !user.isActive ||
+    user.approvalStatus !== "APPROVED" ||
+    user.locked
+  ) {
+    return undefined;
+  }
+
+  return user;
 }
