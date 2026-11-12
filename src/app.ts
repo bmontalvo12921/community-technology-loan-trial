@@ -1,3 +1,4 @@
+
 import Fastify, {
   type FastifyInstance,
   type FastifyRequest
@@ -9,8 +10,9 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
-import { db } from "./db.js";
+
 import { hashPassword } from "./password.js";
+
 import {
   createRequest,
   getRequest,
@@ -19,8 +21,18 @@ import {
   transitionPending
 } from "./request-service.js";
 
-import { MySqlInventoryRepository } from "./mysql-inventory-repository.js";
-import { authenticateUser, createAccount, registerUser, ROLE_PERMISSIONS } from "./auth-service.js";
+import { InMemoryInventoryRepository } from "./repository.js";
+
+import {
+  authenticateUser,
+  createAccount,
+  findActiveRegularUser,
+  listUsers,
+  registerUser,
+  ROLE_PERMISSIONS,
+  setUserActive
+} from "./auth-service.js";
+
 import {
   DEVICE_STATUSES,
   DEVICE_TYPES,
@@ -53,11 +65,8 @@ declare module "@fastify/jwt" {
 const positiveId = z.coerce.number().int().positive();
 
 const deviceType = z.enum(DEVICE_TYPES);
-
 const deviceStatus = z.enum(DEVICE_STATUSES);
-
 const loanStatus = z.enum(LOAN_STATUSES);
-
 const maintenanceStatus = z.enum(MAINTENANCE_STATUSES);
 
 const date = z
@@ -85,14 +94,15 @@ const pagination = {
 
 const nonempty = (max: number) =>
   z.string().trim().min(1).max(max);
+
 const registerBodySchema = z.object({
   email: z.string().trim().toLowerCase().email().max(255),
-  password: z.string().min(12).max(256),
+  password: z.string().min(12).max(256)
 }).strict();
 
 const loginBodySchema = z.object({
   email: z.string().trim().email().max(255),
-  password: z.string().min(1).max(256),
+  password: z.string().min(1).max(256)
 }).strict();
 
 const idParams = (name: string) =>
@@ -143,7 +153,9 @@ const loanBody = z
     }
   )
   .refine(
-    (value) => value.participantCode !== undefined || value.userId !== undefined,
+    (value) =>
+      value.participantCode !== undefined ||
+      value.userId !== undefined,
     {
       message: "Provide a participantCode or a userId",
       path: ["participantCode"]
@@ -159,7 +171,8 @@ const maintenanceBody = z
   .strict();
 
 /**
- * Development token permissions: everything an admin can do.
+ * Development token permissions:
+ * everything an admin can do.
  */
 const developmentRoles = [...ROLE_PERMISSIONS.ADMIN];
 
@@ -188,11 +201,17 @@ function parse<S extends z.ZodTypeAny>(
 /**
  * Role authorization
  */
-function requirePermission(request: FastifyRequest, permission: string) {
+function requirePermission(
+  request: FastifyRequest,
+  permission: string
+) {
   if (!request.user.permissions?.includes(permission)) {
-    throw Object.assign(new Error("Insufficient permissions"), {
-      statusCode: 403,
-    });
+    throw Object.assign(
+      new Error("Insufficient permissions"),
+      {
+        statusCode: 403
+      }
+    );
   }
 }
 
@@ -200,6 +219,7 @@ const authorize = (permission: string) =>
   async (request: FastifyRequest) => {
     requirePermission(request, permission);
   };
+
 /**
  * Pagination response
  */
@@ -219,10 +239,13 @@ const pageResponse = <T>(
 
 /**
  * Build Fastify application
+ *
+ * The default inventory repository is now in-memory.
+ * No MySQL repository is initialized here.
  */
 export async function buildApp(
   repository: InventoryRepository =
-    new MySqlInventoryRepository()
+    new InMemoryInventoryRepository()
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -254,9 +277,6 @@ export async function buildApp(
 
   /**
    * CORS
-   *
-   * Allows the local frontend to communicate with
-   * the backend API.
    */
   await app.register(cors, {
     origin: [
@@ -301,9 +321,14 @@ export async function buildApp(
           err: error,
           requestId: request.id
         },
-        `Request failed: ${request.method} ${request.url.split("?")[0]} - ${
+        `Request failed: ${request.method} ${
+          request.url.split("?")[0]
+        } - ${
           (error as { code?: string }).code ?? ""
-        } ${(error as { sqlMessage?: string }).sqlMessage ?? (error as Error).message}`
+        } ${
+          (error as { sqlMessage?: string }).sqlMessage ??
+          (error as Error).message
+        }`
       );
 
       const known = error as Error & {
@@ -335,13 +360,21 @@ export async function buildApp(
   );
 
   /**
-   * Staff portal (single-page frontend)
+   * Staff portal
    */
-  const portalUrl = new URL("../frontend/index.html", import.meta.url);
+  const portalUrl = new URL(
+    "../frontend/index.html",
+    import.meta.url
+  );
+
   app.get("/", async (_request, reply) => {
     const html = await readFile(portalUrl, "utf8");
+
     return reply
-      .header("Cache-Control", "no-store, no-cache, must-revalidate")
+      .header(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate"
+      )
       .type("text/html; charset=utf-8")
       .send(html);
   });
@@ -349,82 +382,108 @@ export async function buildApp(
   /**
    * Health check
    */
-  app.get("/health", async () => ({ status: "ok" }));
+  app.get("/health", async () => ({
+    status: "ok"
+  }));
 
   /**
-   * Sign in
+   * ============================
+   * AUTHENTICATION
+   * ============================
    */
-app.post(
-  "/v1/auth/login",
-  {
-    config: {
-      rateLimit: {
-        max: 5,
-        timeWindow: "1 minute",
-      },
+
+  app.post(
+    "/v1/auth/login",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute"
+        }
+      }
     },
-  },
-  async (request, reply) => {
-    const body = parse(loginBodySchema, request.body);
+    async (request, reply) => {
+      const body = parse(
+        loginBodySchema,
+        request.body
+      );
 
-    const result = await authenticateUser(
-      body.email,
-      body.password,
-      request.id,
-    );
+      const result = await authenticateUser(
+        body.email,
+        body.password,
+        request.id
+      );
 
-    if (!result.success) {
-      return reply.code(401).send({
-        error: "Invalid email or password",
-        requestId: request.id,
-      });
+      if (!result.success) {
+        return reply.code(401).send({
+          error: "Invalid email or password",
+          requestId: request.id
+        });
+      }
+
+      const permissions = result.user.permissions;
+
+      const token = await reply.jwtSign(
+        {
+          sub: result.user.id,
+          tenantId: result.user.tenantId,
+          permissions
+        },
+        {
+          expiresIn: "15m"
+        }
+      );
+
+      return {
+        token,
+        tokenType: "Bearer",
+        expiresIn: "15m",
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          role: result.user.role,
+          permissions
+        }
+      };
     }
-
-    const permissions = result.user.permissions;
-
-    const token = await reply.jwtSign(
-      {
-        sub: result.user.id,
-        tenantId: result.user.tenantId,
-        permissions,
-      },
-      { expiresIn: "15m" },
-    );
-
-    return {
-      token,
-      tokenType: "Bearer",
-      expiresIn: "15m",
-      user: {
-        id: result.user.id,
-        email: result.user.email,
-        role: result.user.role,
-        permissions,
-      },
-    };
-  },
-);
+  );
 
   /**
-   * Sign up: anyone can create a regular USER account. Staff and admin
-   * accounts can only be created by an admin through POST /v1/users.
+   * Public registration:
+   * new accounts receive the USER role.
    */
   app.post(
     "/v1/auth/register",
     {
       config: {
-        rateLimit: { max: 5, timeWindow: "1 minute" },
-      },
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute"
+        }
+      }
     },
     async (request, reply) => {
-      const body = parse(registerBodySchema, request.body);
-      const passwordHash = await hashPassword(body.password);
-      const result = await registerUser(body.email, passwordHash, request.id);
+      const body = parse(
+        registerBodySchema,
+        request.body
+      );
+
+      const passwordHash = await hashPassword(
+        body.password
+      );
+
+      const result = await registerUser(
+        body.email,
+        passwordHash,
+        request.id
+      );
 
       if (!result.success) {
         throw Object.assign(
           new Error("An account with that email already exists"),
-          { statusCode: 409 },
+          {
+            statusCode: 409
+          }
         );
       }
 
@@ -432,9 +491,11 @@ app.post(
         {
           sub: result.user.id,
           tenantId: result.user.tenantId,
-          permissions: result.user.permissions,
+          permissions: result.user.permissions
         },
-        { expiresIn: "15m" },
+        {
+          expiresIn: "15m"
+        }
       );
 
       return reply.code(201).send({
@@ -445,21 +506,20 @@ app.post(
           id: result.user.id,
           email: result.user.email,
           role: result.user.role,
-          permissions: result.user.permissions,
-        },
+          permissions: result.user.permissions
+        }
       });
-    },
+    }
   );
 
   /**
    * JWT authentication hook
-   *
-   * Development token endpoint remains public.
    */
- app.addHook(
+  app.addHook(
     "onRequest",
     async (request) => {
-      const pathname = request.url.split("?")[0] ?? request.url;
+      const pathname =
+        request.url.split("?")[0] ?? request.url;
 
       if (
         !pathname.startsWith("/v1/") ||
@@ -476,7 +536,7 @@ app.post(
 
   /**
    * ============================
-   * USERS (admin only)
+   * USERS
    * ============================
    */
 
@@ -488,61 +548,60 @@ app.post(
     })
     .strict();
 
+  /**
+   * List users.
+   * Staff can see regular users.
+   * Admins can see all accounts.
+   */
   app.get(
     "/v1/users",
-    { preHandler: authorize("users:read") },
+    {
+      preHandler: authorize("users:read")
+    },
     async (request) => {
-      // Staff can look up regular users to assign equipment; only admins
-      // (users:write) see staff and admin accounts.
-      const isAdmin = request.user.permissions.includes("users:write");
-      const [rows] = await db.execute(
-        `SELECT id, email, role
-           FROM users
-          WHERE tenant_id = ?${isAdmin ? "" : " AND role = 'USER'"}
-          ORDER BY id`,
-        [request.user.tenantId]
-      );
-      const profileRows = rows as { id: number | string; email: string; role: string }[];
-      const userIds = profileRows.map((row) => Number(row.id));
-      const activeById = new Map<number, boolean>();
-      if (userIds.length) {
-        const [authRows] = await db.query(
-          "SELECT user_id, is_active FROM user_auth WHERE tenant_id = ? AND user_id IN (?)",
-          [request.user.tenantId, userIds]
-        );
-        for (const row of authRows as { user_id: number | string; is_active: number | boolean }[]) {
-          activeById.set(Number(row.user_id), Boolean(row.is_active));
-        }
-      }
+      const isAdmin =
+        request.user.permissions.includes("users:write");
 
       return {
-        data: profileRows.map((row) => ({
-          userId: Number(row.id),
-          email: row.email,
-          role: row.role,
-          isActive: activeById.get(Number(row.id)) ?? false
-        }))
+        data: listUsers(
+          request.user.tenantId,
+          isAdmin
+        )
       };
     }
   );
 
+  /**
+   * Create user.
+   */
   app.post(
     "/v1/users",
-    { preHandler: authorize("users:write") },
+    {
+      preHandler: authorize("users:write")
+    },
     async (request, reply) => {
-      const body = parse(userBody, request.body);
-      const passwordHash = await hashPassword(body.password);
+      const body = parse(
+        userBody,
+        request.body
+      );
+
+      const passwordHash = await hashPassword(
+        body.password
+      );
 
       const result = await createAccount(
         request.user.tenantId,
         body.email,
         passwordHash,
-        body.role,
+        body.role
       );
+
       if (!result.success) {
         throw Object.assign(
           new Error("A user with that email already exists"),
-          { statusCode: 409 }
+          {
+            statusCode: 409
+          }
         );
       }
 
@@ -557,59 +616,62 @@ app.post(
     }
   );
 
+  /**
+   * Activate or deactivate user.
+   */
   app.patch(
     "/v1/users/:userId",
-    { preHandler: authorize("users:write") },
+    {
+      preHandler: authorize("users:write")
+    },
     async (request) => {
       const { userId } = parse(
         idParams("userId"),
         request.params
-      ) as { userId: number };
+      ) as {
+        userId: number;
+      };
 
       const body = parse(
-        z.object({ isActive: z.boolean() }).strict(),
+        z.object({
+          isActive: z.boolean()
+        }).strict(),
         request.body
       );
 
-      if (String(userId) === String(request.user.sub) && !body.isActive) {
+      if (
+        String(userId) === String(request.user.sub) &&
+        !body.isActive
+      ) {
         throw Object.assign(
           new Error("You cannot deactivate your own account"),
-          { statusCode: 400 }
+          {
+            statusCode: 400
+          }
         );
       }
 
-      const connection = await db.getConnection();
-      try {
-        await connection.beginTransaction();
-        const [users] = await connection.execute(
-          "SELECT id FROM users WHERE id = ? AND tenant_id = ? FOR UPDATE",
-          [userId, request.user.tenantId]
+      const updated = setUserActive(
+        request.user.tenantId,
+        userId,
+        body.isActive
+      );
+
+      if (!updated) {
+        throw Object.assign(
+          new Error("User not found"),
+          {
+            statusCode: 404
+          }
         );
-        if (!(users as any[]).length) {
-          await connection.rollback();
-          throw Object.assign(new Error("User not found"), { statusCode: 404 });
-        }
-        const [authRows] = await connection.execute(
-          "SELECT user_id FROM user_auth WHERE user_id = ? AND tenant_id = ? FOR UPDATE",
-          [userId, request.user.tenantId]
-        );
-        if (!(authRows as any[]).length) {
-          await connection.rollback();
-          throw Object.assign(new Error("Authentication record not found for this user"), { statusCode: 409 });
-        }
-        await connection.execute(
-          "UPDATE user_auth SET is_active = ? WHERE user_id = ? AND tenant_id = ?",
-          [body.isActive ? 1 : 0, userId, request.user.tenantId]
-        );
-        await connection.commit();
-      } catch (error) {
-        try { await connection.rollback(); } catch { /* transaction may already be rolled back */ }
-        throw error;
-      } finally {
-        connection.release();
       }
 
-      return { data: { userId, isActive: body.isActive } };
+      return {
+        data: {
+          userId,
+          isActive: body.isActive
+        }
+      };
     }
   );
 
@@ -644,11 +706,10 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listDevices(
-          request.user.tenantId,
-          query
-        );
+      const result = await repository.listDevices(
+        request.user.tenantId,
+        query
+      );
 
       return pageResponse(
         result,
@@ -668,15 +729,14 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.createDevice(
-          request.user.tenantId,
-          body
-        );
+      const data = await repository.createDevice(
+        request.user.tenantId,
+        body
+      );
 
-      return reply
-        .code(201)
-        .send({ data });
+      return reply.code(201).send({
+        data
+      });
     }
   );
 
@@ -693,22 +753,21 @@ app.post(
         deviceId: number;
       };
 
-      const data =
-        await repository.getDevice(
-          request.user.tenantId,
-          deviceId
-        );
+      const data = await repository.getDevice(
+        request.user.tenantId,
+        deviceId
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Device not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Device not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -727,7 +786,9 @@ app.post(
 
       const body = parse(
         deviceBody
-          .omit({ status: true })
+          .omit({
+            status: true
+          })
           .partial()
           .refine(
             (value) =>
@@ -737,23 +798,22 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.updateDevice(
-          request.user.tenantId,
-          deviceId,
-          body
-        );
+      const data = await repository.updateDevice(
+        request.user.tenantId,
+        deviceId,
+        body
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Device not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Device not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -770,44 +830,39 @@ app.post(
         deviceId: number;
       };
 
-      const device =
-        await repository.getDevice(
-          request.user.tenantId,
-          deviceId
-        );
+      const device = await repository.getDevice(
+        request.user.tenantId,
+        deviceId
+      );
 
       if (!device) {
-        return reply
-          .code(404)
-          .send({
-            error: "Device not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Device not found",
+          requestId: request.id
+        });
       }
 
-      const [loans, maintenance] =
-        await Promise.all([
-          repository.listLoans(
-            request.user.tenantId,
-            {
-              deviceId,
-              limit: 100
-            }
-          ),
-          repository.listMaintenance(
-            request.user.tenantId,
-            {
-              deviceId,
-              limit: 100
-            }
-          )
-        ]);
+      const [loans, maintenance] = await Promise.all([
+        repository.listLoans(
+          request.user.tenantId,
+          {
+            deviceId,
+            limit: 100
+          }
+        ),
+        repository.listMaintenance(
+          request.user.tenantId,
+          {
+            deviceId,
+            limit: 100
+          }
+        )
+      ]);
 
       return {
         data: {
           loans: loans.items,
-          maintenanceRecords:
-            maintenance.items
+          maintenanceRecords: maintenance.items
         }
       };
     }
@@ -826,19 +881,16 @@ app.post(
         deviceId: number;
       };
 
-      const device =
-        await repository.getDevice(
-          request.user.tenantId,
-          deviceId
-        );
+      const device = await repository.getDevice(
+        request.user.tenantId,
+        deviceId
+      );
 
       if (!device) {
-        return reply
-          .code(404)
-          .send({
-            error: "Device not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Device not found",
+          requestId: request.id
+        });
       }
 
       const query = parse(
@@ -846,14 +898,13 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listMaintenance(
-          request.user.tenantId,
-          {
-            ...query,
-            deviceId
-          }
-        );
+      const result = await repository.listMaintenance(
+        request.user.tenantId,
+        {
+          ...query,
+          deviceId
+        }
+      );
 
       return pageResponse(
         result,
@@ -872,13 +923,9 @@ app.post(
     .object({
       isActive: z
         .enum(["true", "false"])
-        .transform(
-          (value) => value === "true"
-        )
+        .transform((value) => value === "true")
         .optional(),
-
       search: nonempty(120).optional(),
-
       ...pagination
     })
     .strict();
@@ -894,11 +941,10 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listCenters(
-          request.user.tenantId,
-          query
-        );
+      const result = await repository.listCenters(
+        request.user.tenantId,
+        query
+      );
 
       return pageResponse(
         result,
@@ -918,15 +964,14 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.createCenter(
-          request.user.tenantId,
-          body
-        );
+      const data = await repository.createCenter(
+        request.user.tenantId,
+        body
+      );
 
-      return reply
-        .code(201)
-        .send({ data });
+      return reply.code(201).send({
+        data
+      });
     }
   );
 
@@ -943,22 +988,21 @@ app.post(
         centerId: number;
       };
 
-      const data =
-        await repository.getCenter(
-          request.user.tenantId,
-          centerId
-        );
+      const data = await repository.getCenter(
+        request.user.tenantId,
+        centerId
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Center not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Center not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -986,23 +1030,22 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.updateCenter(
-          request.user.tenantId,
-          centerId,
-          body
-        );
+      const data = await repository.updateCenter(
+        request.user.tenantId,
+        centerId,
+        body
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Center not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Center not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -1019,19 +1062,16 @@ app.post(
         centerId: number;
       };
 
-      const center =
-        await repository.getCenter(
-          request.user.tenantId,
-          centerId
-        );
+      const center = await repository.getCenter(
+        request.user.tenantId,
+        centerId
+      );
 
       if (!center) {
-        return reply
-          .code(404)
-          .send({
-            error: "Center not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Center not found",
+          requestId: request.id
+        });
       }
 
       const query = parse(
@@ -1039,14 +1079,13 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listDevices(
-          request.user.tenantId,
-          {
-            ...query,
-            centerId
-          }
-        );
+      const result = await repository.listDevices(
+        request.user.tenantId,
+        {
+          ...query,
+          centerId
+        }
+      );
 
       return pageResponse(
         result,
@@ -1068,19 +1107,16 @@ app.post(
         centerId: number;
       };
 
-      const center =
-        await repository.getCenter(
-          request.user.tenantId,
-          centerId
-        );
+      const center = await repository.getCenter(
+        request.user.tenantId,
+        centerId
+      );
 
       if (!center) {
-        return reply
-          .code(404)
-          .send({
-            error: "Center not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Center not found",
+          requestId: request.id
+        });
       }
 
       const query = parse(
@@ -1088,14 +1124,13 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listLoans(
-          request.user.tenantId,
-          {
-            ...query,
-            centerId
-          }
-        );
+      const result = await repository.listLoans(
+        request.user.tenantId,
+        {
+          ...query,
+          centerId
+        }
+      );
 
       return pageResponse(
         result,
@@ -1115,18 +1150,13 @@ app.post(
       loanStatus: loanStatus.optional(),
       centerId: positiveId.optional(),
       deviceId: positiveId.optional(),
-      participantCode:
-        nonempty(50).optional(),
+      participantCode: nonempty(50).optional(),
       reasonId: positiveId.optional(),
       userId: positiveId.optional(),
-      checkoutFrom:
-        dateTime.optional(),
-      checkoutTo:
-        dateTime.optional(),
-      dueFrom:
-        dateTime.optional(),
-      dueTo:
-        dateTime.optional(),
+      checkoutFrom: dateTime.optional(),
+      checkoutTo: dateTime.optional(),
+      dueFrom: dateTime.optional(),
+      dueTo: dateTime.optional(),
       ...pagination
     })
     .strict();
@@ -1142,11 +1172,10 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listLoans(
-          request.user.tenantId,
-          query
-        );
+      const result = await repository.listLoans(
+        request.user.tenantId,
+        query
+      );
 
       return pageResponse(
         result,
@@ -1167,38 +1196,36 @@ app.post(
       );
 
       let participantCode = body.participantCode;
+
       if (body.userId !== undefined) {
-        const [users] = await db.execute(
-          `SELECT email FROM users
-            WHERE id = ? AND tenant_id = ? AND role = 'USER'`,
-          [body.userId, request.user.tenantId]
+        const target = findActiveRegularUser(
+          request.user.tenantId,
+          body.userId
         );
-        const target = (users as { email: string }[])[0];
-        const [authRows] = await db.execute(
-          "SELECT is_active FROM user_auth WHERE user_id = ? AND tenant_id = ?",
-          [body.userId, request.user.tenantId]
-        );
-        const auth = (authRows as { is_active: number | boolean }[])[0];
-        if (!target || !auth?.is_active) {
-          throw Object.assign(new Error("User not found"), {
-            statusCode: 404
-          });
+
+        if (!target) {
+          throw Object.assign(
+            new Error("User not found or inactive"),
+            {
+              statusCode: 404
+            }
+          );
         }
+
         participantCode ??= target.email.slice(0, 50);
       }
 
-      const data =
-        await repository.createLoan(
-          request.user.tenantId,
-          {
-            ...body,
-            participantCode: participantCode as string
-          }
-        );
+      const data = await repository.createLoan(
+        request.user.tenantId,
+        {
+          ...body,
+          participantCode: participantCode as string
+        }
+      );
 
-      return reply
-        .code(201)
-        .send({ data });
+      return reply.code(201).send({
+        data
+      });
     }
   );
 
@@ -1215,26 +1242,19 @@ app.post(
         loanId: number;
       };
 
-      const loan =
-        await repository.getLoan(
-          request.user.tenantId,
-          loanId
-        );
+      const loan = await repository.getLoan(
+        request.user.tenantId,
+        loanId
+      );
 
       if (!loan) {
-        return reply
-          .code(404)
-          .send({
-            error: "Loan not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Loan not found",
+          requestId: request.id
+        });
       }
 
-      const [
-        device,
-        center,
-        reason
-      ] = await Promise.all([
+      const [device, center, reason] = await Promise.all([
         repository.getDevice(
           request.user.tenantId,
           loan.deviceId
@@ -1276,10 +1296,8 @@ app.post(
       const body = parse(
         z
           .object({
-            dueDate:
-              dateTime.optional(),
-            reasonId:
-              positiveId.optional()
+            dueDate: dateTime.optional(),
+            reasonId: positiveId.optional()
           })
           .strict()
           .refine(
@@ -1290,23 +1308,22 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.updateLoan(
-          request.user.tenantId,
-          loanId,
-          body
-        );
+      const data = await repository.updateLoan(
+        request.user.tenantId,
+        loanId,
+        body
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Loan not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Loan not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -1326,32 +1343,30 @@ app.post(
       const body = parse(
         z
           .object({
-            returnDate:
-              dateTime.default(
-                () => new Date().toISOString()
-              )
+            returnDate: dateTime.default(
+              () => new Date().toISOString()
+            )
           })
           .strict(),
         request.body ?? {}
       );
 
-      const data =
-        await repository.returnLoan(
-          request.user.tenantId,
-          loanId,
-          body.returnDate
-        );
+      const data = await repository.returnLoan(
+        request.user.tenantId,
+        loanId,
+        body.returnDate
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Loan not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Loan not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -1364,51 +1379,45 @@ app.post(
   app.get(
     "/v1/loan-reasons",
     {
-      preHandler:
-        authorize("loan-reasons:read")
+      preHandler: authorize("loan-reasons:read")
     },
     async (request) => ({
-      data:
-        await repository.listLoanReasons(
-          request.user.tenantId
-        )
+      data: await repository.listLoanReasons(
+        request.user.tenantId
+      )
     })
   );
 
   app.post(
     "/v1/loan-reasons",
     {
-      preHandler:
-        authorize("loan-reasons:write")
+      preHandler: authorize("loan-reasons:write")
     },
     async (request, reply) => {
       const body = parse(
         z
           .object({
-            reasonName:
-              nonempty(100)
+            reasonName: nonempty(100)
           })
           .strict(),
         request.body
       );
 
-      const data =
-        await repository.createLoanReason(
-          request.user.tenantId,
-          body.reasonName
-        );
+      const data = await repository.createLoanReason(
+        request.user.tenantId,
+        body.reasonName
+      );
 
-      return reply
-        .code(201)
-        .send({ data });
+      return reply.code(201).send({
+        data
+      });
     }
   );
 
   app.get(
     "/v1/loan-reasons/:reasonId",
     {
-      preHandler:
-        authorize("loan-reasons:read")
+      preHandler: authorize("loan-reasons:read")
     },
     async (request, reply) => {
       const { reasonId } = parse(
@@ -1418,30 +1427,28 @@ app.post(
         reasonId: number;
       };
 
-      const data =
-        await repository.getLoanReason(
-          request.user.tenantId,
-          reasonId
-        );
+      const data = await repository.getLoanReason(
+        request.user.tenantId,
+        reasonId
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Loan reason not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Loan reason not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
   app.patch(
     "/v1/loan-reasons/:reasonId",
     {
-      preHandler:
-        authorize("loan-reasons:write")
+      preHandler: authorize("loan-reasons:write")
     },
     async (request, reply) => {
       const { reasonId } = parse(
@@ -1454,30 +1461,28 @@ app.post(
       const body = parse(
         z
           .object({
-            reasonName:
-              nonempty(100)
+            reasonName: nonempty(100)
           })
           .strict(),
         request.body
       );
 
-      const data =
-        await repository.updateLoanReason(
-          request.user.tenantId,
-          reasonId,
-          body.reasonName
-        );
+      const data = await repository.updateLoanReason(
+        request.user.tenantId,
+        reasonId,
+        body.reasonName
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error: "Loan reason not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Loan reason not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
@@ -1489,24 +1494,12 @@ app.post(
 
   const maintenanceQuery = z
     .object({
-      deviceId:
-        positiveId.optional(),
-
-      maintenanceStatus:
-        maintenanceStatus.optional(),
-
-      serviceFrom:
-        date.optional(),
-
-      serviceTo:
-        date.optional(),
-
-      resolvedFrom:
-        date.optional(),
-
-      resolvedTo:
-        date.optional(),
-
+      deviceId: positiveId.optional(),
+      maintenanceStatus: maintenanceStatus.optional(),
+      serviceFrom: date.optional(),
+      serviceTo: date.optional(),
+      resolvedFrom: date.optional(),
+      resolvedTo: date.optional(),
       ...pagination
     })
     .strict();
@@ -1514,8 +1507,7 @@ app.post(
   app.get(
     "/v1/maintenance",
     {
-      preHandler:
-        authorize("maintenance:read")
+      preHandler: authorize("maintenance:read")
     },
     async (request) => {
       const query = parse(
@@ -1523,11 +1515,10 @@ app.post(
         request.query
       );
 
-      const result =
-        await repository.listMaintenance(
-          request.user.tenantId,
-          query
-        );
+      const result = await repository.listMaintenance(
+        request.user.tenantId,
+        query
+      );
 
       return pageResponse(
         result,
@@ -1539,8 +1530,7 @@ app.post(
   app.post(
     "/v1/maintenance",
     {
-      preHandler:
-        authorize("maintenance:write")
+      preHandler: authorize("maintenance:write")
     },
     async (request, reply) => {
       const body = parse(
@@ -1548,23 +1538,21 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.createMaintenance(
-          request.user.tenantId,
-          body
-        );
+      const data = await repository.createMaintenance(
+        request.user.tenantId,
+        body
+      );
 
-      return reply
-        .code(201)
-        .send({ data });
+      return reply.code(201).send({
+        data
+      });
     }
   );
 
   app.get(
     "/v1/maintenance/:maintenanceId",
     {
-      preHandler:
-        authorize("maintenance:read")
+      preHandler: authorize("maintenance:read")
     },
     async (request, reply) => {
       const { maintenanceId } = parse(
@@ -1574,51 +1562,42 @@ app.post(
         maintenanceId: number;
       };
 
-      const data =
-        await repository.getMaintenance(
-          request.user.tenantId,
-          maintenanceId
-        );
+      const data = await repository.getMaintenance(
+        request.user.tenantId,
+        maintenanceId
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error:
-              "Maintenance record not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Maintenance record not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
   app.patch(
     "/v1/maintenance/:maintenanceId",
     {
-      preHandler:
-        authorize("maintenance:write")
+      preHandler: authorize("maintenance:write")
     },
     async (request, reply) => {
-      const { maintenanceId } =
-        parse(
-          idParams("maintenanceId"),
-          request.params
-        ) as {
-          maintenanceId: number;
-        };
+      const { maintenanceId } = parse(
+        idParams("maintenanceId"),
+        request.params
+      ) as {
+        maintenanceId: number;
+      };
 
       const body = parse(
         z
           .object({
-            issueDescription:
-              nonempty(65535).optional(),
-
-            maintenanceStatus:
-              z
-                .literal("IN_PROGRESS")
-                .optional()
+            issueDescription: nonempty(65535).optional(),
+            maintenanceStatus: z.literal("IN_PROGRESS").optional()
           })
           .strict()
           .refine(
@@ -1629,125 +1608,150 @@ app.post(
         request.body
       );
 
-      const data =
-        await repository.updateMaintenance(
-          request.user.tenantId,
-          maintenanceId,
-          body
-        );
+      const data = await repository.updateMaintenance(
+        request.user.tenantId,
+        maintenanceId,
+        body
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error:
-              "Maintenance record not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Maintenance record not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
   app.post(
     "/v1/maintenance/:maintenanceId/resolve",
     {
-      preHandler:
-        authorize("maintenance:write")
+      preHandler: authorize("maintenance:write")
     },
     async (request, reply) => {
-      const { maintenanceId } =
-        parse(
-          idParams("maintenanceId"),
-          request.params
-        ) as {
-          maintenanceId: number;
-        };
+      const { maintenanceId } = parse(
+        idParams("maintenanceId"),
+        request.params
+      ) as {
+        maintenanceId: number;
+      };
 
       const body = parse(
         z
           .object({
-            resolvedDate:
-              date.default(
-                () =>
-                  new Date()
-                    .toISOString()
-                    .slice(0, 10)
-              )
+            resolvedDate: date.default(
+              () =>
+                new Date()
+                  .toISOString()
+                  .slice(0, 10)
+            )
           })
           .strict(),
         request.body ?? {}
       );
 
-      const data =
-        await repository.resolveMaintenance(
-          request.user.tenantId,
-          maintenanceId,
-          body.resolvedDate
-        );
+      const data = await repository.resolveMaintenance(
+        request.user.tenantId,
+        maintenanceId,
+        body.resolvedDate
+      );
 
       if (!data) {
-        return reply
-          .code(404)
-          .send({
-            error:
-              "Maintenance record not found",
-            requestId: request.id
-          });
+        return reply.code(404).send({
+          error: "Maintenance record not found",
+          requestId: request.id
+        });
       }
 
-      return { data };
+      return {
+        data
+      };
     }
   );
 
   /**
    * ============================
-   * MY EQUIPMENT AND REQUESTS (regular users)
+   * MY EQUIPMENT AND REQUESTS
    * ============================
    */
 
-  const currentUserId = (request: FastifyRequest) => {
+  const currentUserId = (
+    request: FastifyRequest
+  ) => {
     const id = Number(request.user.sub);
+
     if (!Number.isInteger(id) || id < 1) {
-      throw Object.assign(new Error("Invalid session"), { statusCode: 401 });
+      throw Object.assign(
+        new Error("Invalid session"),
+        {
+          statusCode: 401
+        }
+      );
     }
+
     return id;
   };
 
   app.get(
     "/v1/me/loans",
-    { preHandler: authorize("my-loans:read") },
+    {
+      preHandler: authorize("my-loans:read")
+    },
     async (request) => {
       const userId = currentUserId(request);
-      const result = await repository.listLoans(request.user.tenantId, {
-        userId,
-        limit: 100
-      });
+
+      const result = await repository.listLoans(
+        request.user.tenantId,
+        {
+          userId,
+          limit: 100
+        }
+      );
+
       const devices = await Promise.all(
         result.items.map((loan) =>
-          repository.getDevice(request.user.tenantId, loan.deviceId)
+          repository.getDevice(
+            request.user.tenantId,
+            loan.deviceId
+          )
         )
       );
+
       return {
-        data: result.items.map((loan, i) => ({ ...loan, device: devices[i] }))
+        data: result.items.map(
+          (loan, index) => ({
+            ...loan,
+            device: devices[index]
+          })
+        )
       };
     }
   );
 
   app.get(
     "/v1/me/requests",
-    { preHandler: authorize("my-requests:read") },
+    {
+      preHandler: authorize("my-requests:read")
+    },
     async (request) => ({
-      data: await listRequests(request.user.tenantId, {
-        userId: currentUserId(request)
-      })
+      data: await listRequests(
+        request.user.tenantId,
+        {
+          userId: currentUserId(request)
+        }
+      )
     })
   );
 
   app.post(
     "/v1/me/requests",
-    { preHandler: authorize("my-requests:write") },
+    {
+      preHandler: authorize("my-requests:write")
+    },
     async (request, reply) => {
       const body = parse(
         z
@@ -1764,71 +1768,108 @@ app.post(
       const data = await createRequest(
         request.user.tenantId,
         currentUserId(request),
-        body
+        body,
+        repository
       );
-      return reply.code(201).send({ data });
+
+      return reply.code(201).send({
+        data
+      });
     }
   );
 
   app.post(
     "/v1/me/requests/:requestId/cancel",
-    { preHandler: authorize("my-requests:write") },
+    {
+      preHandler: authorize("my-requests:write")
+    },
     async (request) => {
       const { requestId } = parse(
         idParams("requestId"),
         request.params
-      ) as { requestId: number };
+      ) as {
+        requestId: number;
+      };
 
       const ok = await transitionPending(
         request.user.tenantId,
         requestId,
         "CANCELLED",
-        { ownerId: currentUserId(request) }
+        {
+          ownerId: currentUserId(request)
+        }
       );
+
       if (!ok) {
         throw Object.assign(
           new Error("Request not found or no longer pending"),
-          { statusCode: 409 }
+          {
+            statusCode: 409
+          }
         );
       }
-      return { data: await getRequest(request.user.tenantId, requestId) };
+
+      return {
+        data: await getRequest(
+          request.user.tenantId,
+          requestId
+        )
+      };
     }
   );
 
   /**
    * ============================
-   * EQUIPMENT REQUESTS (staff and admin)
+   * EQUIPMENT REQUESTS
    * ============================
    */
 
   app.get(
     "/v1/requests",
-    { preHandler: authorize("requests:read") },
+    {
+      preHandler: authorize("requests:read")
+    },
     async (request) => {
       const query = parse(
         z
           .object({
             status: z
-              .enum(["PENDING", "APPROVED", "DENIED", "CANCELLED"])
+              .enum([
+                "PENDING",
+                "APPROVED",
+                "DENIED",
+                "CANCELLED"
+              ])
               .optional(),
             userId: positiveId.optional()
           })
           .strict(),
         request.query
       );
-      return { data: await listRequests(request.user.tenantId, query) };
+
+      return {
+        data: await listRequests(
+          request.user.tenantId,
+          query
+        )
+      };
     }
   );
 
   app.post(
     "/v1/requests/:requestId/approve",
-    { preHandler: authorize("requests:write") },
+    {
+      preHandler: authorize("requests:write")
+    },
     async (request) => {
       const tenantId = request.user.tenantId;
+
       const { requestId } = parse(
         idParams("requestId"),
         request.params
-      ) as { requestId: number };
+      ) as {
+        requestId: number;
+      };
 
       const body = parse(
         z
@@ -1841,65 +1882,125 @@ app.post(
         request.body
       );
 
-      const existing = await getRequest(tenantId, requestId);
+      const existing = await getRequest(
+        tenantId,
+        requestId
+      );
+
       if (!existing) {
-        throw Object.assign(new Error("Request not found"), {
-          statusCode: 404
-        });
+        throw Object.assign(
+          new Error("Request not found"),
+          {
+            statusCode: 404
+          }
+        );
       }
 
-      const device = await repository.getDevice(tenantId, body.deviceId);
+      const device = await repository.getDevice(
+        tenantId,
+        body.deviceId
+      );
+
       if (!device) {
-        throw Object.assign(new Error("Device not found"), {
-          statusCode: 404
-        });
+        throw Object.assign(
+          new Error("Device not found"),
+          {
+            statusCode: 404
+          }
+        );
       }
 
       if (device.centerId !== existing.centerId) {
         throw Object.assign(
-          new Error("Choose available equipment at the requested outreach center"),
-          { statusCode: 400 }
+          new Error(
+            "Choose available equipment at the requested outreach center"
+          ),
+          {
+            statusCode: 400
+          }
         );
       }
 
-      const reasonId = body.reasonId ?? existing.reasonId;
-      if (reasonId === null || reasonId === undefined) {
+      const reasonId =
+        body.reasonId ?? existing.reasonId;
+
+      if (
+        reasonId === null ||
+        reasonId === undefined
+      ) {
         throw Object.assign(
-          new Error("Choose a loan reason; the request did not include one"),
-          { statusCode: 400 }
+          new Error(
+            "Choose a loan reason; the request did not include one"
+          ),
+          {
+            statusCode: 400
+          }
         );
       }
 
       const checkoutDate = new Date().toISOString();
+
       if (body.dueDate <= checkoutDate) {
-        throw Object.assign(new Error("dueDate must be in the future"), {
-          statusCode: 400
-        });
+        throw Object.assign(
+          new Error("dueDate must be in the future"),
+          {
+            statusCode: 400
+          }
+        );
       }
 
-      // Claim the request first so two staff members cannot fulfil it twice.
-      const claimed = await transitionPending(tenantId, requestId, "APPROVED");
+      /**
+       * Claim the request before creating the loan.
+       * This prevents two staff members from fulfilling
+       * the same pending request simultaneously.
+       */
+      const claimed = await transitionPending(
+        tenantId,
+        requestId,
+        "APPROVED"
+      );
+
       if (!claimed) {
-        throw Object.assign(new Error("Request is no longer pending"), {
-          statusCode: 409
-        });
+        throw Object.assign(
+          new Error("Request is no longer pending"),
+          {
+            statusCode: 409
+          }
+        );
       }
 
       try {
-        const loan = await repository.createLoan(tenantId, {
-          deviceId: device.deviceId,
-          centerId: device.centerId,
-          reasonId,
-          participantCode: (existing.userEmail ?? `user-${existing.userId}`).slice(0, 50),
-          userId: existing.userId,
-          checkoutDate,
-          dueDate: body.dueDate
-        });
+        const loan = await repository.createLoan(
+          tenantId,
+          {
+            deviceId: device.deviceId,
+            centerId: device.centerId,
+            reasonId,
+            participantCode: (
+              existing.userEmail ??
+              `user-${existing.userId}`
+            ).slice(0, 50),
+            userId: existing.userId,
+            checkoutDate,
+            dueDate: body.dueDate
+          }
+        );
+
         return {
-          data: { request: await getRequest(tenantId, requestId), loan }
+          data: {
+            request: await getRequest(
+              tenantId,
+              requestId
+            ),
+            loan
+          }
         };
       } catch (error) {
-        await revertToPending(tenantId, requestId);
+        await revertToPending(
+          tenantId,
+          requestId
+        );
+
         throw error;
       }
     }
@@ -1907,21 +2008,40 @@ app.post(
 
   app.post(
     "/v1/requests/:requestId/deny",
-    { preHandler: authorize("requests:write") },
+    {
+      preHandler: authorize("requests:write")
+    },
     async (request) => {
       const tenantId = request.user.tenantId;
+
       const { requestId } = parse(
         idParams("requestId"),
         request.params
-      ) as { requestId: number };
-      const ok = await transitionPending(tenantId, requestId, "DENIED");
+      ) as {
+        requestId: number;
+      };
+
+      const ok = await transitionPending(
+        tenantId,
+        requestId,
+        "DENIED"
+      );
+
       if (!ok) {
         throw Object.assign(
           new Error("Request not found or no longer pending"),
-          { statusCode: 409 }
+          {
+            statusCode: 409
+          }
         );
       }
-      return { data: await getRequest(tenantId, requestId) };
+
+      return {
+        data: await getRequest(
+          tenantId,
+          requestId
+        )
+      };
     }
   );
 
@@ -1930,8 +2050,8 @@ app.post(
    * DEVELOPMENT TOKEN
    * ============================
    *
-   * This endpoint is intentionally
-   * available only outside production.
+   * This endpoint is only enabled outside production
+   * when ENABLE_DEV_TOKEN=true.
    */
   if (
     process.env.NODE_ENV !== "production" &&
@@ -1943,25 +2063,21 @@ app.post(
         const body = parse(
           z
             .object({
-              tenantId:
-                nonempty(120)
+              tenantId: nonempty(120)
             })
             .strict(),
           request.body
         );
 
-        const token =
-          await reply.jwtSign(
-            {
-              tenantId:
-                body.tenantId,
-              permissions:
-                developmentRoles
-            },
-            {
-              expiresIn: "15m"
-            }
-          );
+        const token = await reply.jwtSign(
+          {
+            tenantId: body.tenantId,
+            permissions: developmentRoles
+          },
+          {
+            expiresIn: "15m"
+          }
+        );
 
         return {
           token,
