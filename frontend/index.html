@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,43 +5,49 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Community Technology Loan</title>
 <style>
-*{box-sizing:border-box}body{margin:0;font:15px Arial,sans-serif;background:#f2f5f9;color:#1d2939}
-header{background:#142b4a;color:white;padding:22px 28px}header h1{margin:0 0 6px;font-size:23px}
-main{max-width:1200px;margin:auto;padding:24px}.panel,.card{background:white;border:1px solid #dce4ee;border-radius:10px;padding:20px;margin-bottom:18px}
-.login{max-width:430px;margin:55px auto}.field{margin:14px 0}label{display:block;margin-bottom:6px;font-weight:bold}
-input{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
-button{padding:10px 15px;border:0;border-radius:6px;background:#2463a6;color:white;cursor:pointer;margin:3px}
-button:hover{background:#184b80}.secondary{background:#e8eef6;color:#142b4a}
-nav{margin:16px 0}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
-.metric{font-size:30px;font-weight:bold;margin-top:10px}.muted{color:#667085;font-size:13px}
-table{border-collapse:collapse;width:100%;background:white}th,td{text-align:left;padding:12px;border-bottom:1px solid #e5e7eb}
-th{background:#f8fafc} .table-wrap{overflow:auto}.hidden{display:none!important}body.role-user .staff-only,body:not(.role-user) .user-only{display:none!important}a{color:#1d4f8a}
-#message{padding:12px;border-radius:7px;margin:12px 0;background:#e8f4ff;white-space:pre-wrap}
-.error{background:#fff0ef!important;color:#a32018}.success{background:#e7f7ed!important;color:#17663a}
-body.signed-out{background:#0f2744;min-height:100vh}
-body.signed-out header,body.signed-out #message{display:none}
-body.signed-out main{max-width:none;padding:0}
-.brand{text-align:center;color:#fff;padding:44px 16px 24px}
+*{box-sizing:border-box}body{margin:0;font:15px Arial,sans-serif;background:#f6f8fb;color:#102e50}
+button,input,select,textarea{font:inherit}button{padding:10px 15px;border:1px solid #c7d5e5;border-radius:4px;background:#fff;color:#123657;cursor:pointer;margin:0;font-size:13px;font-weight:700}
+button:hover{background:#edf4fa}.hidden{display:none!important}a{color:#1d4f8a}.muted{color:#687e96;font-size:13px}
+#loginPanel{min-height:100vh;padding:1px 0 40px;background:#102f4f}.brand{text-align:center;color:#fff;padding:44px 16px 24px}
 .brand .logo{width:40px;height:40px;margin:0 auto 18px;border-radius:8px;background:#f97316;display:flex;align-items:center;justify-content:center}
-.brand .city{font-size:11px;letter-spacing:.12em;color:#b6c8e0;font-weight:bold}
-.brand h1{margin:8px 0 6px;font-size:19px}.brand .sub{font-size:12px;color:#b6c8e0}
-.signin-card{max-width:248px;width:calc(100% - 32px);margin:0 auto;background:#fff;border-radius:6px;padding:18px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
-.signin-card h2{font-size:14px;margin:0 0 14px}.signin-card .field{margin:10px 0}
-.signin-card label{font-size:11px;font-weight:bold;margin-bottom:5px}.signin-card label span{color:#d92d20}
-.signin-card input{padding:9px;font-size:12px;border-radius:4px}
-.signin-card button{width:100%;margin:6px 0 0;padding:10px;background:#1d4f8a;font-weight:bold;font-size:12px;border-radius:4px}
+.brand .city{font-size:11px;letter-spacing:.12em;color:#b6c8e0;font-weight:bold}.brand h1{margin:8px 0 6px;font-size:19px}.brand .sub{font-size:12px;color:#b6c8e0}
+.signin-card{max-width:360px;width:calc(100% - 32px);margin:0 auto;background:#fff;border-radius:7px;padding:22px;box-shadow:0 8px 28px rgba(0,0,0,.25)}
+.signin-card h2{font-size:18px;margin:0 0 14px}.field{margin:14px 0}.field label,label{display:block;margin-bottom:6px;font-weight:bold}.signin-card label{font-size:12px}.signin-card label span{color:#d92d20}
+input,select,textarea{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#162f4a}.signin-card button{width:100%;margin-top:8px;background:#1d4f8a;color:#fff}
 #signinError{margin:0 0 10px;padding:9px;border-radius:4px;font-size:12px;background:#fff0ef;color:#a32018}
-.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
-.formgrid label{font-size:12px}select{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;background:#fff}
-.danger{background:#b42318}.danger:hover{background:#912018}.small{padding:6px 10px;font-size:13px}
-#formArea form{margin-bottom:20px}
+#appPanel{display:grid;grid-template-columns:228px minmax(0,1fr);min-height:100vh;background:#f6f8fb}
+.sidebar{background:#143453;color:#fff;display:flex;flex-direction:column;min-height:100vh}
+.sidebar-brand{padding:16px 0 25px 0;border-bottom:1px solid rgba(255,255,255,.12)}.sidebar-brand h2{margin:0 0 12px;padding:0 0 0 0;font-size:20px;color:#fff}
+.sidebar-brand span{font-size:12px;color:#d2dfeb}.side-nav{display:flex;flex-direction:column;gap:5px;padding:18px 12px}
+.side-link{border:0;background:transparent;color:#e4edf6;text-align:left;padding:12px 10px;border-radius:4px;font-size:13px}
+.side-link:hover{background:rgba(255,255,255,.1);color:#fff}.side-link.active{background:#1c6ca6;color:white}
+body.role-user .staff-only,body:not(.role-user) .user-only{display:none!important}
+.sidebar-footer{margin-top:auto;padding:18px 2px 20px;border-top:1px solid rgba(255,255,255,.12);display:grid;gap:28px}
+#userInfo{font-size:12px;color:#fff;font-weight:700;overflow-wrap:anywhere}#userRole{font-size:11px;color:#b7cbe0;margin-top:-24px}
+#logoutButton{border:0;background:transparent;color:#fff;text-align:left;padding:6px 0;font-size:12px}.workspace{min-width:0;padding:20px 34px 50px 34px;max-width:1500px;width:100%}
+.page-header{margin:0 0 26px;padding:0;background:none;color:#102e50}.eyebrow{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:#68829c;font-weight:700;margin-bottom:15px}
+.page-header h1{font-size:27px;line-height:1.2;margin:0 0 6px;color:#112f50}.page-header p{margin:0;color:#183e64;font-size:16px}
+.toolbar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-bottom:16px}.toolbar button{padding:9px 13px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:15px;margin-bottom:22px}.metric-card,.panel,.card,.outreach-card{background:#fff;border:1px solid #dce5ef;border-radius:7px}
+.metric-card{padding:16px}.metric{font-size:27px;font-weight:bold;margin-top:10px;color:#123657}
+.panel{padding:18px;margin-bottom:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;background:white}th,td{text-align:left;padding:12px;border-bottom:1px solid #e5eaf0}th{background:#f8fafc}
+.center-grid{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:16px;padding:18px 20px 20px}
+.cards-view{border:0;background:transparent;padding:0}.empty-state{padding:18px 20px;color:#687e96}
+.outreach-card{padding:19px 18px;box-shadow:0 3px 10px rgba(19,49,78,.06);min-height:198px;display:flex;flex-direction:column;align-items:flex-start}
+.outreach-card h2{font-size:23px;line-height:1.15;margin:3px 0 5px;color:#132f4e}.status-pill{border-radius:15px;padding:4px 10px;font-size:10px;font-weight:bold;margin-bottom:7px}
+.status-pill.active{background:#e2f5ec;color:#08734e}.status-pill.inactive{background:#f1e9e8;color:#8c3d34}
+.center-meta{font-size:12px;line-height:1.5;color:#57718d}.device-count{font-weight:700;margin:3px 0 4px;color:#152f4d}
+.outreach-card button{padding:10px 14px;margin-top:auto;font-size:12px}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.formgrid label{font-size:12px}
+.danger{background:#b42318;color:#fff;border-color:#b42318}.danger:hover{background:#912018}.small{padding:6px 10px;font-size:13px}
+#message{padding:12px;border-radius:7px;margin:0 0 16px;background:#e8f4ff;white-space:pre-wrap}.error{background:#fff0ef!important;color:#a32018}.success{background:#e7f7ed!important;color:#17663a}
+#formArea form{margin-bottom:20px}.secondary{background:#e8eef6;color:#142b4a}
+@media(max-width:900px){#appPanel{grid-template-columns:190px minmax(0,1fr)}.workspace{padding:20px}.center-grid{grid-template-columns:repeat(2,minmax(210px,1fr))}.metrics{grid-template-columns:repeat(2,minmax(140px,1fr))}}
+@media(max-width:620px){#appPanel{grid-template-columns:1fr}.sidebar{min-height:auto}.sidebar-brand{padding:14px 16px 12px}.side-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:10px 12px}.sidebar-footer{margin-top:0;padding:12px 16px;grid-template-columns:1fr auto;align-items:center;gap:6px}.sidebar-footer #userRole{margin:0}.workspace{padding:22px 16px}.center-grid{grid-template-columns:1fr;padding:12px}.page-header h1{font-size:24px}.metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}
 </style>
 </head>
 <body class="signed-out">
-<header><h1>Community Technology Loan</h1><div>City of Orlando · Inventory Management</div></header>
-<main>
-<div id="message" class="hidden"></div>
 <section id="loginPanel">
 <div class="brand"><div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
 <div class="city">CITY OF ORLANDO</div><h1>Community Technology Loan Project</h1><div class="sub">Equipment Portal</div></div>
@@ -64,30 +69,36 @@ body.signed-out main{max-width:none;padding:0}
 </div>
 </section>
 <section id="appPanel" class="hidden">
-<div class="panel"><strong id="userInfo"></strong><button class="secondary" id="logoutButton">Log out</button><button id="refreshButton">Refresh data</button></div>
-<h2 class="staff-only">Overview</h2>
-<div class="cards staff-only">
-<div class="card"><div class="muted">Devices</div><div class="metric" id="deviceCount">—</div></div>
-<div class="card"><div class="muted">Available devices</div><div class="metric" id="availableCount">—</div></div>
-<div class="card"><div class="muted">Outreach centers</div><div class="metric" id="centerCount">—</div></div>
-<div class="card"><div class="muted">Loan reasons</div><div class="metric" id="reasonCount">—</div></div>
-</div>
-<nav>
-<button data-tab="myloans" data-permission="my-loans:read" class="user-only">My Equipment</button>
-<button data-tab="myrequests" data-permission="my-requests:read" class="user-only">My Requests</button>
-<button data-tab="centers" data-permission="centers:read" class="user-only">Outreach Centers</button>
-<button data-tab="requests" data-permission="requests:read" class="staff-only">Requests</button>
-<button data-tab="inventory" data-permission="inventory:read" class="staff-only">Inventory</button>
-<button data-tab="centers" data-permission="centers:read" class="staff-only">Outreach Centers</button>
-<button data-tab="reasons" data-permission="loan-reasons:read" class="staff-only">Loan Reasons</button>
-<button data-tab="loans" data-permission="loans:read" class="staff-only">Loans</button>
-<button data-tab="maintenance" data-permission="maintenance:read" class="staff-only">Maintenance</button>
-<button data-tab="users" id="usersTab" data-permission="users:read" class="hidden">Users</button>
+<aside class="sidebar">
+<div class="sidebar-brand"><h2>Tech Loan</h2><span>City of Orlando</span></div>
+<nav class="side-nav">
+<button class="side-link" data-tab="dashboard" data-permission="inventory:read">Dashboard</button>
+<button class="side-link staff-only" data-tab="inventory" data-permission="inventory:read">Device Inventory</button>
+<button class="side-link" data-tab="centers" data-permission="centers:read">Outreach Centers</button>
+<button class="side-link staff-only" data-tab="loans" data-permission="loans:read">Loans</button>
+<button class="side-link staff-only" data-tab="users" data-permission="users:read">Users</button>
+<button class="side-link staff-only" data-tab="requests" data-permission="requests:read">Requests</button>
+<button class="side-link staff-only" data-tab="reasons" data-permission="loan-reasons:read">Loan Reasons</button>
+<button class="side-link staff-only" data-tab="maintenance" data-permission="maintenance:read">Maintenance</button>
+<button class="side-link user-only" data-tab="myloans" data-permission="my-loans:read">My Equipment</button>
+<button class="side-link user-only" data-tab="myrequests" data-permission="my-requests:read">My Requests</button>
+<button class="side-link" data-tab="settings">Settings</button>
 </nav>
-<div class="panel"><div class="toolbar"><h2 id="tableTitle">Inventory</h2><button id="addButton" class="hidden"></button></div><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></div>
-<p class="muted staff-only">Staff and admins can assign equipment, edit a loan's reason or due date, and mark loans returned. Admins can also add equipment, centers, loan reasons, maintenance records and users, and deactivate centers and users. Records are deactivated rather than deleted so loan history stays intact.</p>
-</section>
+<div class="sidebar-footer"><strong id="userInfo"></strong><span id="userRole"></span><button id="logoutButton">Logout</button></div>
+</aside>
+<main class="workspace">
+<div id="message" class="hidden"></div>
+<header class="page-header"><div class="eyebrow">City of Orlando · Community Technology Loan Project</div><h1 id="tableTitle">Outreach Centers</h1><p id="pageDescription"></p></header>
+<div class="toolbar"><button id="refreshButton" class="secondary">Refresh data</button><button id="addButton" class="hidden"></button></div>
+<div class="metrics staff-only">
+<div class="metric-card"><div class="muted">Devices</div><div class="metric" id="deviceCount">—</div></div>
+<div class="metric-card"><div class="muted">Available devices</div><div class="metric" id="availableCount">—</div></div>
+<div class="metric-card"><div class="muted">Outreach centers</div><div class="metric" id="centerCount">—</div></div>
+<div class="metric-card"><div class="muted">Loan reasons</div><div class="metric" id="reasonCount">—</div></div>
+</div>
+<section id="contentPanel" class="panel"><div id="formArea"></div><div class="table-wrap" id="tableContent">Sign in to load data.</div></section>
 </main>
+</section>
 <script>
 const API="";
 let token="",user=null,activeTab="inventory";
@@ -111,9 +122,10 @@ async function enter(result){
  token=result.token;user=result.user;
  $("loginPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");document.body.classList.remove("signed-out");$("signinError").classList.add("hidden");
  document.body.classList.toggle("role-user",isUser());
- $("userInfo").textContent=user.email+" · "+user.role;
+ $("userInfo").textContent=user.email;
+ $("userRole").textContent=user.role;
  document.querySelectorAll("[data-permission]").forEach(el=>el.classList.toggle("hidden",!can(el.dataset.permission)));
- activeTab=isUser()?"myloans":(user.role==="STAFF"&&can("requests:read")?"requests":"inventory");
+ activeTab=isUser()?"myloans":(user.role==="STAFF"&&can("requests:read")?"requests":"centers");
  await refreshData();
 }
 function authError(text){$("signinError").textContent=text;$("signinError").classList.remove("hidden")}
@@ -178,19 +190,45 @@ const requestReason=x=>(x.reasonId?reasonName(x.reasonId)+": ":"")+x.reasonText;
 const fmt=v=>v?new Date(v).toLocaleString([],{dateStyle:"medium",timeStyle:"short"}):"";
 const ADDABLE={myrequests:"Request equipment",inventory:"Add equipment",centers:"Add center",reasons:"Add loan reason",loans:"Assign equipment (new loan)",maintenance:"Add maintenance record",users:"Add user"};
 function actionBtn(label,fn,cls=""){return '<button class="small '+cls+'" onclick="'+fn+'">'+label+'</button>'}
+function centerCards(centers){
+ if(!centers.length)return '<p class="empty-state">No outreach centers found.</p>';
+ return '<div class="center-grid">'+centers.map(c=>{
+  const count=data.inventory.filter(d=>d.centerId===c.centerId).length;
+  return '<article class="outreach-card"><h2>'+esc(c.centerName)+'</h2><span class="status-pill '+(c.isActive?'active':'inactive')+'">'+(c.isActive?'Active':'Inactive')+'</span><div class="center-meta">'+esc(c.address)+'<br>'+esc(c.phone)+'</div><div class="device-count">'+count+' '+(count===1?'Device':'Devices')+'</div><button type="button" onclick="viewCenter('+Number(c.centerId)+')">View Center</button>'+(can("centers:write")?'<button type="button" class="secondary" onclick="toggleCenter('+Number(c.centerId)+','+!c.isActive+')">'+(c.isActive?'Deactivate':'Activate')+'</button>':'')+'</article>';
+ }).join('')+'</div>';
+}
+function viewCenter(id){
+ const center=data.centers.find(c=>c.centerId===id);if(!center)return;
+ const devices=data.inventory.filter(d=>d.centerId===id);
+ $("tableTitle").textContent=center.centerName;
+ $("pageDescription").textContent=center.address+' · '+center.phone;
+ $("contentPanel").classList.remove('cards-view');
+ $("tableContent").innerHTML='<button type="button" class="secondary" onclick="render(\'centers\')">Back to Outreach Centers</button><h2>Equipment at this center</h2>'+table(["Asset Tag","Type","Manufacturer","Model","Status"],devices.map(d=>[d.assetTag,d.deviceType,d.manufacturer,d.model,d.status]));
+}
 function render(tab){
  activeTab=tab;let title,headers,rows;
  $("formArea").innerHTML="";
- if(tab==="myloans"){title="My Equipment";headers=["Equipment","Type","Checked out","Due","Returned","Status"];rows=data.myloans.map(x=>[x.device?x.device.assetTag+" · "+x.device.manufacturer+" "+x.device.model:x.deviceId,x.device?x.device.deviceType:"",fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus])}
+ if(tab==="dashboard"){title="Dashboard";headers=[];rows=[]}
+ else if(tab==="settings"){title="Settings";headers=[];rows=[]}
+ else if(tab==="myloans"){title="My Equipment";headers=["Equipment","Type","Checked out","Due","Returned","Status"];rows=data.myloans.map(x=>[x.device?x.device.assetTag+" · "+x.device.manufacturer+" "+x.device.model:x.deviceId,x.device?x.device.deviceType:"",fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus])}
  else if(tab==="myrequests"){title="My Requests";headers=["#","Equipment type","Outreach center","Reason","Submitted","Status"].concat(can("my-requests:write")?[""]:[]);rows=data.myrequests.map(x=>[x.requestId,x.deviceType,centerName(x.centerId),requestReason(x),fmt(x.createdAt),x.status].concat(can("my-requests:write")?[x.status==="PENDING"?{html:actionBtn("Cancel","cancelRequest("+x.requestId+")","secondary")} : ""]:[]))}
  else if(tab==="requests"){title="Equipment Requests";headers=["#","User","Type wanted","Outreach center","Reason","Submitted","Status"].concat(can("requests:write")?["Action"]:[]);rows=data.requests.map(x=>[x.requestId,x.userEmail,x.deviceType,centerName(x.centerId),requestReason(x),fmt(x.createdAt),x.status].concat(can("requests:write")?[x.status==="PENDING"?{html:actionBtn("Assign","approveRequest("+x.requestId+")")+actionBtn("Deny","denyRequest("+x.requestId+")","danger")} : ""]:[]))}
  else if(tab==="inventory"){title="Inventory";headers=["ID","Asset Tag","Serial Number","Type","Manufacturer","Model","Status","Center"];rows=data.inventory.map(x=>[x.deviceId,x.assetTag,x.serialNumber,x.deviceType,x.manufacturer,x.model,x.status,x.centerId])}
  else if(tab==="reasons"){title="Loan Reasons";headers=["ID","Reason"];rows=data.reasons.map(x=>[x.reasonId,x.reasonName])}
  else if(tab==="loans"){title="Loans";headers=["ID","Equipment","Center","Reason","Borrower","Checkout","Due","Returned","Status"].concat(can("loans:write")?["Action"]:[]);rows=data.loans.map(x=>[x.loanId,deviceName(x.deviceId),centerName(x.centerId),reasonName(x.reasonId),x.participantCode,fmt(x.checkoutDate),fmt(x.dueDate),fmt(x.returnDate),x.loanStatus].concat(can("loans:write")?[x.loanStatus==="RETURNED"?"":{html:actionBtn("Edit","editLoan("+x.loanId+")","secondary")+actionBtn("Mark returned","returnLoan("+x.loanId+")")}]:[]))}
  else if(tab==="users"){title="Users";headers=["ID","Email","Role","Active"].concat(can("users:write")?["Action"]:[]);rows=data.users.map(x=>[x.userId,x.email,x.role,x.isActive?"Yes":"No"].concat(can("users:write")?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleUser("+x.userId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
- else if(tab==="centers"){title="Outreach Centers";headers=["ID","Name","Address","Phone","Active"].concat(can("centers:write")?["Action"]:[]);rows=data.centers.map(x=>[x.centerId,x.centerName,x.address,x.phone,x.isActive?"Yes":"No"].concat(can("centers:write")?[{html:actionBtn(x.isActive?"Deactivate":"Activate","toggleCenter("+x.centerId+","+!x.isActive+")",x.isActive?"danger":"")}]:[]))}
+ else if(tab==="centers"){title="Outreach Centers";headers=[];rows=[]}
  else{title="Maintenance";headers=["ID","Device","Issue","Service Date","Resolved","Status"].concat(can("maintenance:write")?["Action"]:[]);rows=data.maintenance.map(x=>[x.maintenanceId,x.deviceId,x.issueDescription,x.serviceDate,x.resolvedDate,x.maintenanceStatus].concat(can("maintenance:write")?[x.maintenanceStatus==="RESOLVED"?"":{html:actionBtn("Mark resolved","resolveMaintenance("+x.maintenanceId+")")}]:[]))}
- $("tableTitle").textContent=title;$("tableContent").innerHTML=table(headers,rows);
+ $("tableTitle").textContent=title;
+ const descriptions={dashboard:"A quick view of the Community Technology Loan program.",inventory:"Devices available through the technology loan program.",centers:"Community locations participating in the technology loan program.",loans:"Current and past equipment loans.",users:"Accounts with access to the loan program.",requests:"Equipment requests submitted by program participants.",reasons:"Categories used to describe equipment loans.",maintenance:"Equipment currently in or previously through maintenance.",myloans:"Equipment checked out to your account.",myrequests:"Track your equipment requests.",settings:"Your signed-in account details."};
+ $("pageDescription").textContent=descriptions[tab]||"";
+ $("contentPanel").classList.toggle('cards-view',tab==="centers");
+ $(".metrics").classList.toggle("hidden",tab==="centers"||tab==="settings"||tab==="myloans"||tab==="myrequests");
+ if(tab==="centers")$("tableContent").innerHTML=centerCards(data.centers);
+ else if(tab==="dashboard")$("tableContent").innerHTML='<p>Use the navigation to manage inventory, centers, loans, users, and program requests.</p>';
+ else if(tab==="settings")$("tableContent").innerHTML='<p><strong>Signed in as:</strong> '+esc(user.email)+'</p><p><strong>Account type:</strong> '+esc(user.role)+'</p>';
+ else $("tableContent").innerHTML=table(headers,rows);
+ document.querySelectorAll("[data-tab]").forEach(el=>el.classList.toggle("active",el.dataset.tab===tab));
  const addPermission={myrequests:"my-requests:write",inventory:"inventory:write",centers:"centers:write",reasons:"loan-reasons:write",loans:"loans:assign",maintenance:"maintenance:write",users:"users:write"};
  const add=$("addButton");const canAdd=Boolean(ADDABLE[tab]&&can(addPermission[tab]));
  add.classList.toggle("hidden",!canAdd);if(canAdd)add.textContent="+ "+ADDABLE[tab];
@@ -226,7 +264,7 @@ function showForm(tab){
    select("f_user","Assign to user account",[["","None (walk-in, enter name below)"]].concat(data.users.filter(u=>u.role==="USER"&&u.isActive).map(u=>[u.userId,u.email])))+
    '<div><label for="f_code">Borrower name / ID (optional when a user is chosen)</label><input id="f_code" type="text" maxlength="50" placeholder="Name or participant ID"></div>'+
    field("f_out","Checkout","datetime-local",'value="'+loc(now)+'"')+field("f_due","Due","datetime-local",'value="'+loc(due)+'"');
-  submit=()=>["/v1/loans",{deviceId:Number($("f_device").value),centerId:Number($("f_lcenter").value),reasonId:Number($("f_lreason").value),...($("f_user").value?{userId:Number($("f_user").value)}:{}),...(val("f_code")?{participantCode:val("f_code")}:{}),checkoutDate:new Date($("f_out").value).toISOString(),dueDate:new Date($("f_due").value).toISOString()}];
+  submit=()=>["/v1/loans",{deviceId:Number($("f_device").value),centerId:Number($("f_lcenter").value),reasonId:Number($("f_lreason").value),...($("f_user").value?{userId:Number($("f_user").value)}:{}),...(val("f_code")?{participantCode:val("f_code")} :{}),checkoutDate:new Date($("f_out").value).toISOString(),dueDate:new Date($("f_due").value).toISOString()}];
  }else if(tab==="myrequests"){
   const centers=data.centers.filter(c=>c.isActive).map(c=>[c.centerId,c.centerName+" — "+c.address]);
   if(!centers.length){message("No active outreach centers are available. Please contact staff.","error");return}
