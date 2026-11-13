@@ -1,5 +1,4 @@
-
-import { verifyPassword } from "./password.js";
+import { hashPassword, verifyPassword } from "./password.js";
 import {
   memoryStore,
   type AuthRole,
@@ -151,6 +150,89 @@ export async function createAccount(
     success: true,
     user: toAuthenticatedUser(user)
   };
+}
+
+/** Seed demo accounts and example requests outside production. */
+export async function seedLocalDemoAccounts(): Promise<void> {
+  if (process.env.NODE_ENV === "production") return;
+
+  const accounts: Array<{
+    email: string;
+    password: string;
+    role: AuthRole;
+  }> = [
+    {
+      email: "admin@orlando.gov",
+      password: "admin123456789",
+      role: "ADMIN"
+    },
+    {
+      email: "user@orlando.gov",
+      password: "user123456789",
+      role: "USER"
+    }
+  ];
+
+  let demoUserId: number | undefined;
+
+  for (const account of accounts) {
+    const existing = memoryStore.findUserByEmail(
+      TENANT_ID,
+      account.email
+    );
+
+    if (existing) {
+      if (account.role === "USER") {
+        demoUserId = Number(existing.id);
+      }
+      continue;
+    }
+
+    const created = await createAccount(
+      TENANT_ID,
+      account.email,
+      await hashPassword(account.password),
+      account.role
+    );
+
+    if (account.role === "USER" && created.success) {
+      demoUserId = Number(created.user.id);
+    }
+  }
+
+  if (demoUserId !== undefined) {
+    const existingRequests = memoryStore.listRequests(
+      TENANT_ID,
+      demoUserId
+    );
+
+    if (existingRequests.length === 0) {
+      memoryStore.createRequest(
+        TENANT_ID,
+        demoUserId,
+        "user@orlando.gov",
+        {
+          centerId: 1,
+          deviceType: "LAPTOP",
+          reasonId: 2,
+          reasonText:
+            "I need a laptop to complete job applications and online interviews."
+        }
+      );
+
+      memoryStore.createRequest(
+        TENANT_ID,
+        demoUserId,
+        "user@orlando.gov",
+        {
+          centerId: 2,
+          deviceType: "HOTSPOT",
+          reasonId: 1,
+          reasonText: "Reliable internet access for online classes."
+        }
+      );
+    }
+  }
 }
 
 /**
