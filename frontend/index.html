@@ -223,7 +223,7 @@ function render(tab){
  const descriptions={dashboard:"A quick view of the Community Technology Loan program.",inventory:"Devices available through the technology loan program.",centers:"Community locations participating in the technology loan program.",loans:"Current and past equipment loans.",users:"Accounts with access to the loan program.",requests:"Equipment requests submitted by program participants.",reasons:"Categories used to describe equipment loans.",maintenance:"Equipment currently in or previously through maintenance.",myloans:"Equipment checked out to your account.",myrequests:"Track your equipment requests.",settings:"Your signed-in account details."};
  $("pageDescription").textContent=descriptions[tab]||"";
  $("contentPanel").classList.toggle('cards-view',tab==="centers");
- $(".metrics").classList.toggle("hidden",tab==="centers"||tab==="settings"||tab==="myloans"||tab==="myrequests");
+ document.querySelector(".metrics").classList.toggle("hidden",tab==="centers"||tab==="settings"||tab==="myloans"||tab==="myrequests");
  if(tab==="centers")$("tableContent").innerHTML=centerCards(data.centers);
  else if(tab==="dashboard")$("tableContent").innerHTML='<p>Use the navigation to manage inventory, centers, loans, users, and program requests.</p>';
  else if(tab==="settings")$("tableContent").innerHTML='<p><strong>Signed in as:</strong> '+esc(user.email)+'</p><p><strong>Account type:</strong> '+esc(user.role)+'</p>';
@@ -316,7 +316,7 @@ function approveRequest(id){
  if(!devices.length){message("No available "+r.deviceType.toLowerCase()+" at "+centerName(r.centerId)+".","error");return}
  const reasons=data.reasons.map(x=>[x.reasonId,x.reasonName]);
  const due=new Date(Date.now()+14*864e5),loc=new Date(due.getTime()-due.getTimezoneOffset()*6e4).toISOString().slice(0,16);
- $("formArea").innerHTML='<form id="approveForm"><p class="muted">Assigning to '+esc(r.userEmail)+' at '+esc(centerName(r.centerId))+' — "'+esc(r.reasonText)+'"</p><div class="formgrid">'+select("a_device","Equipment",devices)+select("a_reason","Loan reason",reasons)+field("a_due","Due","datetime-local",'value="'+loc+'"')+'</div><button type="submit">Assign equipment</button><button type="button" class="secondary" id="cancelApprove">Cancel</button></form>';
+ $("formArea").innerHTML='<form id="approveForm"><p class="muted">Assigning to '+esc(r.userEmail)+' at '+esc(centerName(r.centerId))+' — "'+esc(r.reasonText)+'"</p><div class="formgrid">'+select("a_device","Equipment",devices)+select("a_reason","Loan reason",reasons)+field("a_due","Due","datetime-local",'value="'+loc+'"' )+'</div><button type="submit">Assign equipment</button><button type="button" class="secondary" id="cancelApprove">Cancel</button></form>';
  if(r.reasonId)$("a_reason").value=String(r.reasonId);
  $("cancelApprove").onclick=()=>{$("formArea").innerHTML=""};
  $("approveForm").addEventListener("submit",async e=>{
