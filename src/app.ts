@@ -1,4 +1,3 @@
-
 import Fastify, {
   type FastifyInstance,
   type FastifyRequest
@@ -30,6 +29,7 @@ import {
   listUsers,
   registerUser,
   ROLE_PERMISSIONS,
+  seedLocalDemoAccounts,
   setUserActive
 } from "./auth-service.js";
 
@@ -267,6 +267,8 @@ export async function buildApp(
       "JWT_SECRET must be set to at least 32 characters"
     );
   }
+
+  await seedLocalDemoAccounts();
 
   /**
    * Security middleware
