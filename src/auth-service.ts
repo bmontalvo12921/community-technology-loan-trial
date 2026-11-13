@@ -111,11 +111,6 @@ function audit(
   });
 }
 
-/**
- * Create an account using the in-memory user store.
- *
- * Password hashing is performed by the caller.
- */
 export async function createAccount(
   tenantId: string,
   email: string,
@@ -152,7 +147,6 @@ export async function createAccount(
   };
 }
 
-/** Seed demo accounts and example requests outside production. */
 export async function seedLocalDemoAccounts(): Promise<void> {
   if (process.env.NODE_ENV === "production") return;
 
@@ -203,7 +197,7 @@ export async function seedLocalDemoAccounts(): Promise<void> {
   if (demoUserId !== undefined) {
     const existingRequests = memoryStore.listRequests(
       TENANT_ID,
-      demoUserId
+      { userId: demoUserId }
     );
 
     if (existingRequests.length === 0) {
@@ -235,11 +229,6 @@ export async function seedLocalDemoAccounts(): Promise<void> {
   }
 }
 
-/**
- * Authenticate a user.
- *
- * Accounts lock after three consecutive failed password attempts.
- */
 export async function authenticateUser(
   email: string,
   password: string,
@@ -251,63 +240,23 @@ export async function authenticateUser(
   );
 
   if (!user) {
-    audit(
-      TENANT_ID,
-      null,
-      "LOGIN_FAILURE",
-      "INVALID_CREDENTIALS",
-      requestId
-    );
-
-    return {
-      success: false,
-      reason: "INVALID_CREDENTIALS"
-    };
+    audit(TENANT_ID, null, "LOGIN_FAILURE", "INVALID_CREDENTIALS", requestId);
+    return { success: false, reason: "INVALID_CREDENTIALS" };
   }
 
   if (user.locked) {
-    audit(
-      TENANT_ID,
-      user.id,
-      "LOGIN_FAILURE",
-      "ACCOUNT_LOCKED",
-      requestId
-    );
-
-    return {
-      success: false,
-      reason: "ACCOUNT_LOCKED"
-    };
+    audit(TENANT_ID, user.id, "LOGIN_FAILURE", "ACCOUNT_LOCKED", requestId);
+    return { success: false, reason: "ACCOUNT_LOCKED" };
   }
 
   if (user.approvalStatus === "PENDING") {
-    audit(
-      TENANT_ID,
-      user.id,
-      "LOGIN_FAILURE",
-      "PENDING_APPROVAL",
-      requestId
-    );
-
-    return {
-      success: false,
-      reason: "ACCOUNT_PENDING_APPROVAL"
-    };
+    audit(TENANT_ID, user.id, "LOGIN_FAILURE", "PENDING_APPROVAL", requestId);
+    return { success: false, reason: "ACCOUNT_PENDING_APPROVAL" };
   }
 
   if (!user.isActive) {
-    audit(
-      TENANT_ID,
-      user.id,
-      "LOGIN_FAILURE",
-      "ACCOUNT_INACTIVE",
-      requestId
-    );
-
-    return {
-      success: false,
-      reason: "ACCOUNT_INACTIVE"
-    };
+    audit(TENANT_ID, user.id, "LOGIN_FAILURE", "ACCOUNT_INACTIVE", requestId);
+    return { success: false, reason: "ACCOUNT_INACTIVE" };
   }
 
   const passwordMatches = await verifyPassword(
@@ -335,21 +284,12 @@ export async function authenticateUser(
 
     return {
       success: false,
-      reason: shouldLock
-        ? "ACCOUNT_LOCKED"
-        : "INVALID_CREDENTIALS"
+      reason: shouldLock ? "ACCOUNT_LOCKED" : "INVALID_CREDENTIALS"
     };
   }
 
   user.failedAttempts = 0;
-
-  audit(
-    TENANT_ID,
-    user.id,
-    "LOGIN_SUCCESS",
-    "SUCCESS",
-    requestId
-  );
+  audit(TENANT_ID, user.id, "LOGIN_SUCCESS", "SUCCESS", requestId);
 
   return {
     success: true,
@@ -357,10 +297,6 @@ export async function authenticateUser(
   };
 }
 
-/**
- * Self-service registration creates a pending USER account.
- * An administrator must activate the account before login.
- */
 export async function registerUser(
   email: string,
   passwordHash: string,
@@ -374,9 +310,7 @@ export async function registerUser(
     false
   );
 
-  if (!result.success) {
-    return result;
-  }
+  if (!result.success) return result;
 
   audit(
     TENANT_ID,
@@ -389,9 +323,6 @@ export async function registerUser(
   return result;
 }
 
-/**
- * List users within a tenant.
- */
 export function listUsers(
   tenantId: string,
   includeStaffAndAdmins: boolean
@@ -402,9 +333,6 @@ export function listUsers(
   );
 }
 
-/**
- * Activate or deactivate an account.
- */
 export function setUserActive(
   tenantId: string,
   userId: string | number,
@@ -429,10 +357,6 @@ export function setUserActive(
   return success;
 }
 
-/**
- * Verify that a user is an active regular user.
- * Used when assigning equipment to a user account.
- */
 export function findActiveRegularUser(
   tenantId: string,
   userId: string | number
